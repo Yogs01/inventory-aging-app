@@ -247,7 +247,8 @@ app.get('/api/stats', (req, res) => {
   const totals = db.prepare(`
     SELECT
       COUNT(*) as sku_count,
-      SUM(available) as total_units,
+      SUM(age_0_90+age_91_180+age_181_270+age_271_365+age_365_455+age_455_plus) as total_units,
+      SUM(available) as total_available,
       SUM(age_0_90) as age_0_90,
       SUM(age_91_180) as age_91_180,
       SUM(age_181_270) as age_181_270,

@@ -488,7 +488,7 @@ async function loadStats() {
     // Metrics
     document.getElementById('metricsWrap').innerHTML = `
       <div class="metric"><div class="metric-label">Total SKUs</div><div class="metric-val">${fmtNum(t.sku_count)}</div><div class="metric-sub">unique products</div></div>
-      <div class="metric m-green"><div class="metric-label">Total Units</div><div class="metric-val">${fmtNum(t.total_units)}</div><div class="metric-sub">fulfillable</div></div>
+      <div class="metric m-green"><div class="metric-label">Total Units</div><div class="metric-val">${fmtNum(t.total_units)}</div><div class="metric-sub">${fmtNum(t.total_available)} fulfillable</div></div>
       <div class="metric m-green"><div class="metric-label">0–90 Days</div><div class="metric-val">${fmtNum(t.age_0_90)}</div><div class="metric-sub">${pct(t.age_0_90,total)} · healthy</div></div>
       <div class="metric m-yellow"><div class="metric-label">91–180 Days</div><div class="metric-val">${fmtNum(t.age_91_180)}</div><div class="metric-sub">${pct(t.age_91_180,total)} · monitor</div></div>
       <div class="metric m-orange"><div class="metric-label">180+ Days</div><div class="metric-val">${fmtNum(aged180)}</div><div class="metric-sub">${pct(aged180,total)} · at risk</div></div>
