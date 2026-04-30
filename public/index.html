@@ -166,6 +166,7 @@ tr:hover td{background:var(--bg)}
   <div class="nav-links">
     <button class="nav-link active" onclick="showTab('overview',this)">Overview</button>
     <button class="nav-link" onclick="showTab('skus',this)">All SKUs</button>
+    <button class="nav-link" onclick="showTab('aged',this)">🚨 Aged Items</button>
     <button class="nav-link" onclick="showTab('brands',this)">By Brand</button>
     <button class="nav-link" onclick="showTab('upload',this)">Upload</button>
   </div>
@@ -240,8 +241,8 @@ tr:hover td{background:var(--bg)}
     <div class="tbl-scroll">
       <table>
         <thead><tr>
-          <th>Product</th><th>SKU</th><th>Brand</th>
-          <th>365–455d</th><th>455+d</th><th>Total Aged</th><th>Action</th>
+          <th>Product</th><th>FNSKU</th><th>ASIN</th><th>SKU</th><th>Brand</th>
+          <th>365–455d</th><th>455+d</th><th>Total 365+</th><th>Action</th>
         </tr></thead>
         <tbody id="flaggedBody"></tbody>
       </table>
@@ -278,6 +279,47 @@ tr:hover td{background:var(--bg)}
       <button id="nextBtn" onclick="changePage(1)">Next →</button>
     </div>
   </div>
+</div>
+
+<!-- ══ AGED ITEMS ══════════════════════════════════════════════════════ -->
+<div id="tab-aged" style="display:none">
+
+  <!-- 365+ section -->
+  <div class="table-card" style="margin-bottom:20px">
+    <div class="table-topbar" style="background:var(--red-bg)">
+      <div>
+        <h3 style="color:var(--red)">🚨 365+ Days Old — LTSF Risk</h3>
+        <div class="table-meta" id="aged365Meta" style="margin-top:2px"></div>
+      </div>
+    </div>
+    <div class="tbl-scroll" id="aged365Wrap">
+      <table><tbody><tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>
+    </div>
+    <div class="pager" id="pager365" style="display:none">
+      <button id="prev365" onclick="changeAgedPage(365,-1)">← Prev</button>
+      <div class="pager-info" id="pagerInfo365">—</div>
+      <button id="next365" onclick="changeAgedPage(365,1)">Next →</button>
+    </div>
+  </div>
+
+  <!-- 180+ section -->
+  <div class="table-card">
+    <div class="table-topbar" style="background:#fffbeb">
+      <div>
+        <h3 style="color:#92400e">⚠️ 180–364 Days Old — At Risk</h3>
+        <div class="table-meta" id="aged180Meta" style="margin-top:2px"></div>
+      </div>
+    </div>
+    <div class="tbl-scroll" id="aged180Wrap">
+      <table><tbody><tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>
+    </div>
+    <div class="pager" id="pager180" style="display:none">
+      <button id="prev180" onclick="changeAgedPage(180,-1)">← Prev</button>
+      <div class="pager-info" id="pagerInfo180">—</div>
+      <button id="next180" onclick="changeAgedPage(180,1)">Next →</button>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══ BRANDS ══════════════════════════════════════════════════════════ -->
@@ -334,6 +376,7 @@ const AGE_KEYS   = ['age_0_90','age_91_180','age_181_270','age_271_365','age_365
 
 let ageChart, actionChart, brandChart, storageChart;
 let currentPage = 1, currentAged = '', debTimer;
+let agedPage365 = 1, agedPage180 = 1;
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 function showTab(name, el) {
@@ -342,6 +385,7 @@ function showTab(name, el) {
   document.querySelectorAll('.nav-link').forEach(a => a.classList.remove('active'));
   el.classList.add('active');
   if (name === 'skus')   loadItems(1);
+  if (name === 'aged')   loadAgedTab();
   if (name === 'upload') loadUploadHistory();
 }
 
@@ -489,6 +533,8 @@ async function loadFlagged365() {
     document.getElementById('flaggedBody').innerHTML = d.records.slice(0,20).map(r =>
       `<tr class="flag-row-red">
         <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
+        <td><div class="sku-text">${esc(r.fnsku||'—')}</div></td>
+        <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
         <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
         <td>${esc(r.brand||'—')}</td>
         <td style="color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
@@ -652,6 +698,122 @@ function drawCharts(vals, byAction, byBrand, byStorage) {
       options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:tickColor, boxWidth:11, padding:12, font:{size:11} } } } }
     });
   }
+}
+
+// ── AGED ITEMS TAB ────────────────────────────────────────────────────────────
+async function loadAgedTab() {
+  await loadAgedSection(365, agedPage365);
+  await loadAgedSection(180, agedPage180);
+}
+
+async function loadAgedSection(days, page) {
+  const snap  = document.getElementById('snapshotSelect')?.value || '';
+  const limit = 50;
+  // For 180 section we want 180+ but NOT 365+ (just 180-364 range)
+  // We use a different endpoint call and filter on client for display
+  const qs = new URLSearchParams({ snapshot: snap, aged: String(days), page: String(page) });
+  const wrapId   = `aged${days}Wrap`;
+  const metaId   = `aged${days}Meta`;
+  const pagerId  = `pager${days}`;
+  const prevId   = `prev${days}`;
+  const nextId   = `next${days}`;
+  const infoId   = `pagerInfo${days}`;
+
+  document.getElementById(wrapId).innerHTML =
+    `<table><tbody><tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>`;
+
+  try {
+    const d = await fetch(`/api/items?${qs}`).then(r => r.json());
+    const recs = (d.records || []).filter(r => {
+      if (days === 180) {
+        // Only show items that are 180-364 days (not 365+), to avoid duplication
+        const has180to365 = (r.age_181_270||0)+(r.age_271_365||0) > 0;
+        const has365plus  = (r.age_365_455||0)+(r.age_455_plus||0) > 0;
+        // Include if they have 180-365 units (even if also has 365+, show all 180+ items)
+        return has180to365 || has365plus;
+      }
+      return true;
+    });
+
+    if (!recs.length) {
+      document.getElementById(wrapId).innerHTML =
+        `<div class="empty-state"><p>No items found for this date range.</p></div>`;
+      document.getElementById(pagerId).style.display = 'none';
+      document.getElementById(metaId).textContent = '0 SKUs';
+      return;
+    }
+
+    document.getElementById(metaId).textContent = `${fmtNum(d.total)} SKUs`;
+
+    const is365 = days === 365;
+    document.getElementById(wrapId).innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Product</th>
+          <th>FNSKU</th>
+          <th>ASIN</th>
+          <th>SKU</th>
+          <th>Brand</th>
+          ${is365
+            ? `<th style="color:var(--red)">365–455d</th><th style="color:var(--red)">455+d</th><th style="color:var(--red)">Total 365+</th>`
+            : `<th style="color:var(--orange)">181–270d</th><th style="color:var(--orange)">271–365d</th><th style="color:var(--red)">365+d</th><th style="color:var(--orange)">Total 180+</th>`
+          }
+          <th>Avail</th>
+          <th>Action</th>
+        </tr></thead>
+        <tbody>${recs.map(r => {
+          const aged365 = (r.age_365_455||0)+(r.age_455_plus||0);
+          const aged180 = (r.age_181_270||0)+(r.age_271_365||0)+aged365;
+          const rowCls  = aged365>0 ? 'flag-row-red' : 'flag-row';
+          if (is365) {
+            return `<tr class="flag-row-red">
+              <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
+              <td><div class="sku-text">${esc(r.fnsku||'—')}</div></td>
+              <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
+              <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
+              <td>${esc(r.brand||'—')}</td>
+              <td style="color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
+              <td style="color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
+              <td><strong style="color:var(--red)">${fmtNum(aged365)}</strong></td>
+              <td>${fmtNum(r.available)}</td>
+              <td>${actionBadge(r.recommended_action)}</td>
+            </tr>`;
+          } else {
+            return `<tr class="${rowCls}">
+              <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
+              <td><div class="sku-text">${esc(r.fnsku||'—')}</div></td>
+              <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
+              <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
+              <td>${esc(r.brand||'—')}</td>
+              <td style="color:var(--orange)">${fmtNum(r.age_181_270)}</td>
+              <td style="color:var(--orange)">${fmtNum(r.age_271_365)}</td>
+              <td>${aged365>0?`<strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong>`:'—'}</td>
+              <td><strong style="color:var(--orange)">${fmtNum(aged180)}</strong></td>
+              <td>${fmtNum(r.available)}</td>
+              <td>${actionBadge(r.recommended_action)}</td>
+            </tr>`;
+          }
+        }).join('')}</tbody>
+      </table>`;
+
+    const pg = document.getElementById(pagerId);
+    if (d.pages > 1) {
+      pg.style.display = 'flex';
+      document.getElementById(prevId).disabled = d.page <= 1;
+      document.getElementById(nextId).disabled = d.page >= d.pages;
+      document.getElementById(infoId).textContent = `Page ${d.page} of ${d.pages} · ${fmtNum(d.total)} SKUs`;
+    } else {
+      pg.style.display = 'none';
+    }
+  } catch(e) {
+    document.getElementById(wrapId).innerHTML =
+      `<div class="empty-state"><p>Error loading data.</p></div>`;
+  }
+}
+
+function changeAgedPage(days, dir) {
+  if (days === 365) { agedPage365 += dir; loadAgedSection(365, agedPage365); }
+  else              { agedPage180 += dir; loadAgedSection(180, agedPage180); }
 }
 
 // ── RESET ─────────────────────────────────────────────────────────────────────
