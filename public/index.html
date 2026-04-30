@@ -288,10 +288,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
        ondragover="event.preventDefault();this.classList.add('drag')"
        ondragleave="this.classList.remove('drag')"
        ondrop="handleDrop(event)">
-    <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="uploadFile(this.files[0])"/>
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt,.tsv" onchange="uploadFile(this.files[0])"/>
     <h3>📊 Upload Inventory Aging Report</h3>
-    <p>Drag & drop or click to select your Amazon FBA Inventory Aging Excel file<br/>
-    (Should contain a <strong>Raw Data</strong> sheet and optionally an <strong>Unfulfillable Inv</strong> sheet)</p>
+    <p>Drag & drop or click — supports <strong>CSV</strong> (from Amazon Seller Central) or <strong>Excel</strong><br/>
+    Amazon Seller Central → Reports → Fulfillment → FBA Inventory → Inventory Age</p>
     <div class="upload-badge">Choose Excel File</div>
     <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
     <div id="uploadStatus"></div>

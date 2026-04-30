@@ -58,18 +58,18 @@ function buildAgingRecord(row) {
     age_271_365:             pn(row['inv-age-271-to-365-days']  || row['271-365 Days'] || 0),
     age_365_455:             pn(row['inv-age-365-to-455-days']  || row['inv-age-366-to-455-days'] || row['365-455 Days'] || row['366-455 Days'] || 0),
     age_455_plus:            pn(row['inv-age-455-plus-days']    || row['inv-age-456-plus-days']   || row['455+ Days']   || row['456+ Days']  || 0),
-    sold_t7:                 pn(row['afn-sold-units-past-7-days']  || row['T7']  || 0),
-    sold_t30:                pn(row['afn-sold-units-past-30-days'] || row['T30'] || 0),
-    sold_t60:                pn(row['afn-sold-units-past-60-days'] || row['T60'] || 0),
-    sold_t90:                pn(row['afn-sold-units-past-90-days'] || row['T90'] || 0),
+    sold_t7:                 pn(row['units-shipped-t7']  || row['afn-sold-units-past-7-days']  || row['T7']  || 0),
+    sold_t30:                pn(row['units-shipped-t30'] || row['afn-sold-units-past-30-days'] || row['T30'] || 0),
+    sold_t60:                pn(row['units-shipped-t60'] || row['afn-sold-units-past-60-days'] || row['T60'] || 0),
+    sold_t90:                pn(row['units-shipped-t90'] || row['afn-sold-units-past-90-days'] || row['T90'] || 0),
     sell_through:            parseNum(row['sell-through'] || row['Sell Through'] || null),
     recommended_action:      String(row['recommended-action'] || row['Recommended Action'] || '').trim(),
     recommended_removal_qty: pn(row['recommended-removal-quantity'] || row['Removal Qty'] || 0),
-    unfulfillable_qty:       pn(row['your-unfulfillable-quantity'] || row['unfulfillable-quantity'] || row['Unfulfillable'] || 0),
+    unfulfillable_qty:       pn(row['unfulfillable-quantity'] || row['your-unfulfillable-quantity'] || row['Unfulfillable'] || 0),
     storage_type:            String(row['storage-type'] || row['Storage Type'] || '').trim(),
     your_price:              parseNum(row['your-price'] || row['Price'] || null),
     sales_rank:              parseNum(row['sales-rank'] || row['Sales Rank'] || null),
-    estimated_storage_cost:  parseNum(row['estimated-storage-cost-per-unit'] || row['total-estimated-storage-cost'] || null),
+    estimated_storage_cost:  parseNum(row['estimated-storage-cost-next-month'] || row['estimated-storage-cost-per-unit'] || row['total-estimated-storage-cost'] || null),
     supplier:                String(row['supplier'] || row['Supplier'] || '').trim(),
     brand:                   String(row['brand'] || row['Brand'] || '').trim(),
     row_hash:                hash(snap || '', sku, asin),
@@ -136,8 +136,12 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   setImmediate(() => {
     const job = jobs[jobId];
     try {
-      const wb = XLSX.readFile(req.file.path, { cellDates: false });
-      console.log(`[${jobId}] sheets: ${wb.SheetNames.join(', ')}`);
+      // Support both CSV and Excel files
+      const isCsv = req.file.originalname.toLowerCase().endsWith('.csv');
+      const wb = isCsv
+        ? XLSX.readFile(req.file.path, { type: 'file', raw: false })
+        : XLSX.readFile(req.file.path, { cellDates: false });
+      console.log(`[${jobId}] type=${isCsv?'csv':'xlsx'} sheets: ${wb.SheetNames.join(', ')}`);
 
       const readSheet = name => {
         const s = wb.Sheets[name] || null;
@@ -146,15 +150,25 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
         return raw.map(r => Object.fromEntries(Object.entries(r).map(([k,v]) => [k.trim(), v])));
       };
 
-      // Raw Data sheet (or first sheet)
-      const rawName = wb.SheetNames.find(n => /raw\s*data|raw/i.test(n)) || wb.SheetNames[0];
-      const unfulfName = wb.SheetNames.find(n => /unfulfill/i.test(n));
+      // CSV = always first sheet; Excel = look for Raw Data sheet
+      const rawName = isCsv ? wb.SheetNames[0] : (wb.SheetNames.find(n => /raw\s*data|raw/i.test(n)) || wb.SheetNames[0]);
+      const unfulfName = isCsv ? null : wb.SheetNames.find(n => /unfulfill/i.test(n));
 
       const rawRows = readSheet(rawName);
       console.log(`[${jobId}] raw sheet="${rawName}" rows=${rawRows.length}`);
       if (rawRows[0]) console.log(`[${jobId}] cols:`, Object.keys(rawRows[0]).slice(0,12).join(', '));
 
       let agingAdded = 0, agingSkipped = 0, unfulfAdded = 0;
+
+      // Detect snapshot date from first row and delete old data for that date
+      // so re-uploading the same report always gives fresh data
+      if (rawRows[0]) {
+        const firstSnap = parseDate(rawRows[0]['snapshot-date'] || rawRows[0]['Snapshot Date'] || '');
+        if (firstSnap) {
+          const deleted = db.prepare('DELETE FROM inventory_aging WHERE snapshot_date = ?').run(firstSnap).changes;
+          console.log(`[${jobId}] cleared ${deleted} old rows for snapshot ${firstSnap}`);
+        }
+      }
 
       db.transaction(rows => {
         for (const row of rows) {
