@@ -302,6 +302,24 @@ tr:hover td{background:var(--bg)}
     </div>
   </div>
 
+  <!-- Unfulfillable section -->
+  <div class="table-card" style="margin-bottom:20px">
+    <div class="table-topbar" style="background:#fff7ed">
+      <div>
+        <h3 style="color:var(--orange)">📦 Unfulfillable Inventory</h3>
+        <div class="table-meta" id="unfulfMeta" style="margin-top:2px"></div>
+      </div>
+    </div>
+    <div class="tbl-scroll" id="unfulfWrap">
+      <table><tbody><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>
+    </div>
+    <div class="pager" id="pagerUnfulfilable" style="display:none">
+      <button id="prevUnfulfilable" onclick="changeUnfulfPage(-1)">← Prev</button>
+      <div class="pager-info" id="pagerInfoUnfulfilable">—</div>
+      <button id="nextUnfulfilable" onclick="changeUnfulfPage(1)">Next →</button>
+    </div>
+  </div>
+
   <!-- 180+ section -->
   <div class="table-card">
     <div class="table-topbar" style="background:#fffbeb">
@@ -702,6 +720,7 @@ function drawCharts(vals, byAction, byBrand, byStorage) {
 
 // ── AGED ITEMS TAB ────────────────────────────────────────────────────────────
 async function loadAgedTab() {
+  loadUnfulfillable(1);
   await loadAgedSection(365, agedPage365);
   await loadAgedSection(180, agedPage180);
 }
@@ -815,6 +834,66 @@ function changeAgedPage(days, dir) {
   if (days === 365) { agedPage365 += dir; loadAgedSection(365, agedPage365); }
   else              { agedPage180 += dir; loadAgedSection(180, agedPage180); }
 }
+
+let unfulfPage = 1;
+async function loadUnfulfillable(page) {
+  unfulfPage = page || unfulfPage;
+  const snap = document.getElementById('snapshotSelect')?.value || '';
+  const qs   = new URLSearchParams({ snapshot: snap, page: String(unfulfPage) });
+  document.getElementById('unfulfWrap').innerHTML =
+    `<table><tbody><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>`;
+  try {
+    const d = await fetch(`/api/unfulfillable?${qs}`).then(r => r.json());
+    document.getElementById('unfulfMeta').textContent = `${fmtNum(d.total)} SKUs with unfulfillable units`;
+
+    if (!d.records?.length) {
+      document.getElementById('unfulfWrap').innerHTML =
+        `<div class="empty-state"><p>No unfulfillable inventory for this date.</p></div>`;
+      document.getElementById('pagerUnfulfilable').style.display = 'none';
+      return;
+    }
+
+    document.getElementById('unfulfWrap').innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Product</th>
+          <th>FNSKU</th>
+          <th>ASIN</th>
+          <th>SKU</th>
+          <th>Brand</th>
+          <th>Condition</th>
+          <th>Storage Type</th>
+          <th style="color:var(--orange)">Unfulfillable Qty</th>
+        </tr></thead>
+        <tbody>${d.records.map(r => `
+          <tr>
+            <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
+            <td><div class="sku-text">${esc(r.fnsku||'—')}</div></td>
+            <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
+            <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
+            <td>${esc(r.brand||'—')}</td>
+            <td>${esc(r.condition||'—')}</td>
+            <td>${esc(r.storage_type||'—')}</td>
+            <td><strong style="color:var(--orange)">${fmtNum(r.unfulfillable_qty)}</strong></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+    const pg = document.getElementById('pagerUnfulfilable');
+    if (d.pages > 1) {
+      pg.style.display = 'flex';
+      document.getElementById('prevUnfulfilable').disabled = d.page <= 1;
+      document.getElementById('nextUnfulfilable').disabled = d.page >= d.pages;
+      document.getElementById('pagerInfoUnfulfilable').textContent = `Page ${d.page} of ${d.pages} · ${fmtNum(d.total)} SKUs`;
+    } else {
+      pg.style.display = 'none';
+    }
+  } catch(e) {
+    document.getElementById('unfulfWrap').innerHTML =
+      `<div class="empty-state"><p>Error loading data.</p></div>`;
+  }
+}
+function changeUnfulfPage(dir) { unfulfPage += dir; loadUnfulfillable(unfulfPage); }
 
 // ── RESET ─────────────────────────────────────────────────────────────────────
 async function resetData() {

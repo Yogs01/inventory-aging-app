@@ -330,6 +330,32 @@ app.get('/api/filters', (req, res) => {
   res.json({ brands, actions, storages, latestSnapshot: latestSnap, uploads });
 });
 
+// ─── GET /api/unfulfillable ───────────────────────────────────────────────────
+app.get('/api/unfulfillable', (req, res) => {
+  const snap  = req.query.snapshot || '';
+  const page  = parseInt(req.query.page) || 1;
+  const limit = 50;
+  const offset = (page - 1) * limit;
+
+  const latestSnap = db.prepare(`SELECT MAX(snapshot_date) as d FROM inventory_aging`).get()?.d || '';
+  const useSnap = snap || latestSnap;
+
+  const total = db.prepare(`
+    SELECT COUNT(*) as n FROM inventory_aging
+    WHERE snapshot_date = ? AND unfulfillable_qty > 0
+  `).get(useSnap).n;
+
+  const records = db.prepare(`
+    SELECT fnsku, asin, sku, product_name, brand, condition, unfulfillable_qty, storage_type
+    FROM inventory_aging
+    WHERE snapshot_date = ? AND unfulfillable_qty > 0
+    ORDER BY unfulfillable_qty DESC
+    LIMIT ? OFFSET ?
+  `).all(useSnap, limit, offset);
+
+  res.json({ records, total, page, pages: Math.ceil(total / limit) });
+});
+
 // ─── DELETE /api/reset ────────────────────────────────────────────────────────
 app.delete('/api/reset', (req, res) => {
   db.prepare('DELETE FROM inventory_aging').run();
