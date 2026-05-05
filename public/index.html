@@ -68,6 +68,9 @@ nav{background:var(--white);border-bottom:1px solid var(--border);height:52px;di
 .metric.m-red .metric-val{color:var(--red)}
 .metric.m-flag{border-color:var(--red-border);background:var(--red-bg)}
 .metric.m-flag .metric-val{color:var(--red)}
+.tile-clickable{cursor:pointer;transition:all .15s}
+.tile-clickable:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);border-color:var(--accent)}
+.tile-clickable.active-tile{border-color:var(--accent);box-shadow:0 0 0 2px rgba(79,70,229,.2)}
 
 /* ── AGE VISUAL ── */
 .age-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:20px}
@@ -230,6 +233,20 @@ tr:hover td{background:var(--bg)}
     <div class="chart-card">
       <div class="chart-title">Storage Type</div>
       <div class="chart-wrap"><canvas id="storageChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Bracket SKU table (loads on tile click) -->
+  <div class="table-card" id="bracketCard" style="display:none">
+    <div class="table-topbar">
+      <h3 id="bracketTitle">SKUs in bracket</h3>
+      <div class="table-meta" id="bracketMeta"></div>
+    </div>
+    <div class="tbl-scroll" id="bracketWrap"></div>
+    <div class="pager" id="bracketPager" style="display:none">
+      <button id="bracketPrev" onclick="changeBracketPage(-1)">← Prev</button>
+      <div class="pager-info" id="bracketPagerInfo">—</div>
+      <button id="bracketNext" onclick="changeBracketPage(1)">Next →</button>
     </div>
   </div>
 
@@ -396,6 +413,7 @@ const AGE_KEYS   = ['age_0_90','age_91_180','age_181_270','age_271_365','age_365
 let ageChart, actionChart, brandChart, storageChart;
 let currentPage = 1, currentAged = '', debTimer;
 let agedPage365 = 1, agedPage180 = 1;
+let bracketPage = 1, bracketAged = '', bracketLabel = '';
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 function showTab(name, el) {
@@ -504,14 +522,18 @@ async function loadStats() {
       alert180.classList.add('hidden');
     }
 
-    // Metrics
+    const aged181_270 = t.age_181_270||0;
+    const aged271_365 = t.age_271_365||0;
+
+    // Metrics — clickable age tiles
     document.getElementById('metricsWrap').innerHTML = `
       <div class="metric"><div class="metric-label">Total SKUs</div><div class="metric-val">${fmtNum(t.sku_count)}</div><div class="metric-sub">unique products</div></div>
       <div class="metric m-green"><div class="metric-label">Total Units</div><div class="metric-val">${fmtNum(t.total_units)}</div><div class="metric-sub">${fmtNum(t.total_available)} fulfillable</div></div>
-      <div class="metric m-green"><div class="metric-label">0–90 Days</div><div class="metric-val">${fmtNum(t.age_0_90)}</div><div class="metric-sub">${pct(t.age_0_90,total)} · healthy</div></div>
-      <div class="metric m-yellow"><div class="metric-label">91–180 Days</div><div class="metric-val">${fmtNum(t.age_91_180)}</div><div class="metric-sub">${pct(t.age_91_180,total)} · monitor</div></div>
-      <div class="metric m-orange"><div class="metric-label">180+ Days</div><div class="metric-val">${fmtNum(aged180)}</div><div class="metric-sub">${pct(aged180,total)} · at risk</div></div>
-      <div class="metric ${aged365>0?'m-flag':'m-red'}"><div class="metric-label">365+ Days 🚨</div><div class="metric-val">${fmtNum(aged365)}</div><div class="metric-sub">${pct(aged365,total)} · LTSF risk</div></div>
+      <div class="metric m-green tile-clickable" onclick="loadBracketSKUs('0','0–90 Days')"><div class="metric-label">0–90 Days</div><div class="metric-val">${fmtNum(t.age_0_90)}</div><div class="metric-sub">${pct(t.age_0_90,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
+      <div class="metric m-yellow tile-clickable" onclick="loadBracketSKUs('91','91–180 Days')"><div class="metric-label">91–180 Days</div><div class="metric-val">${fmtNum(t.age_91_180)}</div><div class="metric-sub">${pct(t.age_91_180,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
+      <div class="metric m-orange tile-clickable" onclick="loadBracketSKUs('181','181–270 Days')"><div class="metric-label">181–270 Days</div><div class="metric-val">${fmtNum(aged181_270)}</div><div class="metric-sub">${pct(aged181_270,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
+      <div class="metric m-orange tile-clickable" onclick="loadBracketSKUs('271','271–365 Days')"><div class="metric-label">271–365 Days</div><div class="metric-val">${fmtNum(aged271_365)}</div><div class="metric-sub">${pct(aged271_365,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
+      <div class="metric ${aged365>0?'m-flag':'m-red'} tile-clickable" onclick="loadBracketSKUs('365','365+ Days 🚨')"><div class="metric-label">365+ Days 🚨</div><div class="metric-val">${fmtNum(aged365)}</div><div class="metric-sub">${pct(aged365,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
       <div class="metric"><div class="metric-label">Unfulfillable</div><div class="metric-val" style="color:var(--orange)">${fmtNum(t.unfulfillable)}</div><div class="metric-sub">needs removal</div></div>
       ${t.total_storage_cost ? `<div class="metric"><div class="metric-label">Est. Storage</div><div class="metric-val" style="color:var(--red)">$${fmtNum(Math.round(t.total_storage_cost))}</div><div class="metric-sub">next month</div></div>` : ''}
     `;
@@ -895,6 +917,109 @@ async function loadUnfulfillable(page) {
   }
 }
 function changeUnfulfPage(dir) { unfulfPage += dir; loadUnfulfillable(unfulfPage); }
+
+// ── BRACKET SKU TABLE (tile click) ───────────────────────────────────────────
+async function loadBracketSKUs(aged, label, page) {
+  bracketAged  = aged;
+  bracketLabel = label;
+  bracketPage  = page || 1;
+
+  // Highlight the active tile
+  document.querySelectorAll('.tile-clickable').forEach(t => t.classList.remove('active-tile'));
+  document.querySelectorAll('.tile-clickable').forEach(t => {
+    if (t.getAttribute('onclick') && t.getAttribute('onclick').includes(`'${aged}'`)) {
+      t.classList.add('active-tile');
+    }
+  });
+
+  const snap = document.getElementById('snapshotSelect')?.value || '';
+  const qs   = new URLSearchParams({ snapshot: snap, aged, page: bracketPage });
+
+  const card  = document.getElementById('bracketCard');
+  const wrap  = document.getElementById('bracketWrap');
+  const title = document.getElementById('bracketTitle');
+  const meta  = document.getElementById('bracketMeta');
+  const pager = document.getElementById('bracketPager');
+
+  card.style.display  = 'block';
+  title.textContent   = `SKUs — ${label}`;
+  meta.textContent    = 'Loading…';
+  wrap.innerHTML      = `<table><tbody><tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>`;
+  pager.style.display = 'none';
+
+  // Scroll into view
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const d = await fetch(`/api/items?${qs}`).then(r => r.json());
+    if (!d.records?.length) {
+      wrap.innerHTML = `<div class="empty-state"><h3>No SKUs found</h3><p>No items in the ${label} bracket for this report date.</p></div>`;
+      meta.textContent = '0 SKUs';
+      return;
+    }
+
+    meta.textContent = `${fmtNum(d.total)} SKUs`;
+
+    // Choose which age column(s) to highlight based on bracket
+    const colHeader = aged === '0'   ? '<th style="color:var(--green)">0–90d</th>'
+                    : aged === '91'  ? '<th style="color:var(--yellow)">91–180d</th>'
+                    : aged === '181' ? '<th style="color:var(--orange)">181–270d</th>'
+                    : aged === '271' ? '<th style="color:var(--orange)">271–365d</th>'
+                    :                  '<th style="color:var(--red)">365–455d</th><th style="color:var(--red)">455+d</th><th style="color:var(--red)">Total 365+</th>';
+
+    wrap.innerHTML = `<table>
+      <thead><tr>
+        <th>Product</th>
+        <th>SKU</th>
+        <th>ASIN</th>
+        <th>Brand</th>
+        ${colHeader}
+        <th>Avail Units</th>
+        <th>T30 Sales</th>
+        <th>Action</th>
+      </tr></thead>
+      <tbody>${d.records.map(r => {
+        const aged365 = (r.age_365_455||0)+(r.age_455_plus||0);
+        const rowCls  = aged365 > 0 ? 'flag-row-red' : (aged==='181'||aged==='271') ? 'flag-row' : '';
+
+        const bracketCell =
+          aged === '0'   ? `<td style="color:var(--green);font-weight:600">${fmtNum(r.age_0_90)}</td>`
+        : aged === '91'  ? `<td style="color:var(--yellow);font-weight:600">${fmtNum(r.age_91_180)}</td>`
+        : aged === '181' ? `<td style="color:var(--orange);font-weight:600">${fmtNum(r.age_181_270)}</td>`
+        : aged === '271' ? `<td style="color:var(--orange);font-weight:600">${fmtNum(r.age_271_365)}</td>`
+        : `<td style="color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
+           <td style="color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
+           <td><strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong></td>`;
+
+        return `<tr class="${rowCls}">
+          <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
+          <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
+          <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
+          <td>${esc(r.brand||'—')}</td>
+          ${bracketCell}
+          <td>${fmtNum(r.available)}</td>
+          <td>${r.sold_t30 != null ? fmtNum(r.sold_t30) : '—'}</td>
+          <td>${actionBadge(r.recommended_action)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+
+    if (d.pages > 1) {
+      pager.style.display = 'flex';
+      document.getElementById('bracketPrev').disabled = d.page <= 1;
+      document.getElementById('bracketNext').disabled = d.page >= d.pages;
+      document.getElementById('bracketPagerInfo').textContent = `Page ${d.page} of ${d.pages} · ${fmtNum(d.total)} SKUs`;
+    }
+  } catch(e) {
+    wrap.innerHTML = `<div class="empty-state"><p>Error loading SKUs.</p></div>`;
+    meta.textContent = 'Error';
+  }
+}
+
+function changeBracketPage(dir) {
+  bracketPage += dir;
+  loadBracketSKUs(bracketAged, bracketLabel, bracketPage);
+}
 
 // ── RESET ─────────────────────────────────────────────────────────────────────
 async function resetData() {

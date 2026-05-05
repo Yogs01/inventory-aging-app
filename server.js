@@ -306,14 +306,25 @@ app.get('/api/items', (req, res) => {
   if (brand)   { where += ' AND brand = ?'; params.push(brand); }
   if (action)  { where += ' AND recommended_action = ?'; params.push(action); }
   if (storage) { where += ' AND storage_type = ?'; params.push(storage); }
+  if (aged === '0')   { where += ' AND age_0_90 > 0'; }
+  if (aged === '91')  { where += ' AND age_91_180 > 0'; }
+  if (aged === '181') { where += ' AND age_181_270 > 0'; }
+  if (aged === '271') { where += ' AND age_271_365 > 0'; }
   if (aged === '90')  { where += ' AND (age_91_180+age_181_270+age_271_365+age_365_455+age_455_plus) > 0'; }
   if (aged === '180') { where += ' AND (age_181_270+age_271_365+age_365_455+age_455_plus) > 0'; }
   if (aged === '365') { where += ' AND (age_365_455+age_455_plus) > 0'; }
 
+  // Order by the relevant age bracket depending on filter
+  const orderBy = aged === '0'   ? 'age_0_90 DESC'
+                : aged === '91'  ? 'age_91_180 DESC'
+                : aged === '181' ? 'age_181_270 DESC'
+                : aged === '271' ? 'age_271_365 DESC'
+                : '(age_181_270+age_271_365+age_365_455+age_455_plus) DESC, available DESC';
+
   const total   = db.prepare(`SELECT COUNT(*) as n FROM inventory_aging ${where}`).get(...params).n;
   const records = db.prepare(`
     SELECT * FROM inventory_aging ${where}
-    ORDER BY (age_181_270+age_271_365+age_365_455+age_455_plus) DESC, available DESC
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 
