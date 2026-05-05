@@ -534,7 +534,7 @@ async function loadStats() {
       <div class="metric m-orange tile-clickable" onclick="loadBracketSKUs('181','181–270 Days')"><div class="metric-label">181–270 Days</div><div class="metric-val">${fmtNum(aged181_270)}</div><div class="metric-sub">${pct(aged181_270,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
       <div class="metric m-orange tile-clickable" onclick="loadBracketSKUs('271','271–365 Days')"><div class="metric-label">271–365 Days</div><div class="metric-val">${fmtNum(aged271_365)}</div><div class="metric-sub">${pct(aged271_365,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
       <div class="metric ${aged365>0?'m-flag':'m-red'} tile-clickable" onclick="loadBracketSKUs('365','365+ Days 🚨')"><div class="metric-label">365+ Days 🚨</div><div class="metric-val">${fmtNum(aged365)}</div><div class="metric-sub">${pct(aged365,total)} · <span style="color:var(--accent)">click to view SKUs</span></div></div>
-      <div class="metric"><div class="metric-label">Unfulfillable</div><div class="metric-val" style="color:var(--orange)">${fmtNum(t.unfulfillable)}</div><div class="metric-sub">needs removal</div></div>
+      <div class="metric tile-clickable" onclick="loadUnfulfBracket()" style="border-color:${t.unfulfillable>0?'#fdba74':''}"><div class="metric-label">Unfulfillable</div><div class="metric-val" style="color:var(--orange)">${fmtNum(t.unfulfillable)}</div><div class="metric-sub">needs removal · <span style="color:var(--accent)">click to view SKUs</span></div></div>
       ${t.total_storage_cost ? `<div class="metric"><div class="metric-label">Est. Storage</div><div class="metric-val" style="color:var(--red)">$${fmtNum(Math.round(t.total_storage_cost))}</div><div class="metric-sub">next month</div></div>` : ''}
     `;
 
@@ -1010,6 +1010,9 @@ async function loadBracketSKUs(aged, label, page) {
       document.getElementById('bracketNext').disabled = d.page >= d.pages;
       document.getElementById('bracketPagerInfo').textContent = `Page ${d.page} of ${d.pages} · ${fmtNum(d.total)} SKUs`;
     }
+    // Restore default pager handlers (in case unfulfillable overrode them)
+    document.getElementById('bracketPrev').onclick = () => changeBracketPage(-1);
+    document.getElementById('bracketNext').onclick = () => changeBracketPage(1);
   } catch(e) {
     wrap.innerHTML = `<div class="empty-state"><p>Error loading SKUs.</p></div>`;
     meta.textContent = 'Error';
@@ -1019,6 +1022,84 @@ async function loadBracketSKUs(aged, label, page) {
 function changeBracketPage(dir) {
   bracketPage += dir;
   loadBracketSKUs(bracketAged, bracketLabel, bracketPage);
+}
+
+let unfulfBracketPage = 1;
+async function loadUnfulfBracket(page) {
+  unfulfBracketPage = page || 1;
+  bracketAged  = 'unfulfilable';
+  bracketLabel = 'Unfulfillable';
+
+  // Highlight tile
+  document.querySelectorAll('.tile-clickable').forEach(t => t.classList.remove('active-tile'));
+  // find the unfulfillable tile by its onclick
+  document.querySelectorAll('.tile-clickable').forEach(t => {
+    if (t.getAttribute('onclick') === 'loadUnfulfBracket()') t.classList.add('active-tile');
+  });
+
+  const snap = document.getElementById('snapshotSelect')?.value || '';
+  const qs   = new URLSearchParams({ snapshot: snap, page: unfulfBracketPage });
+
+  const card  = document.getElementById('bracketCard');
+  const wrap  = document.getElementById('bracketWrap');
+  const title = document.getElementById('bracketTitle');
+  const meta  = document.getElementById('bracketMeta');
+  const pager = document.getElementById('bracketPager');
+
+  card.style.display  = 'block';
+  title.textContent   = '📦 Unfulfillable SKUs';
+  meta.textContent    = 'Loading…';
+  wrap.innerHTML      = `<table><tbody><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>`;
+  pager.style.display = 'none';
+
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const d = await fetch(`/api/unfulfillable?${qs}`).then(r => r.json());
+    if (!d.records?.length) {
+      wrap.innerHTML = `<div class="empty-state"><h3>No unfulfillable items</h3><p>No unfulfillable inventory for this report date.</p></div>`;
+      meta.textContent = '0 SKUs';
+      return;
+    }
+
+    meta.textContent = `${fmtNum(d.total)} SKUs`;
+
+    wrap.innerHTML = `<table>
+      <thead><tr>
+        <th>Product</th>
+        <th>SKU</th>
+        <th>ASIN</th>
+        <th>Brand</th>
+        <th>Condition</th>
+        <th>Storage Type</th>
+        <th style="color:var(--orange)">Unfulfillable Qty</th>
+      </tr></thead>
+      <tbody>${d.records.map(r => `
+        <tr>
+          <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
+          <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
+          <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
+          <td>${esc(r.brand||'—')}</td>
+          <td>${esc(r.condition||'—')}</td>
+          <td>${esc(r.storage_type||'—')}</td>
+          <td><strong style="color:var(--orange)">${fmtNum(r.unfulfillable_qty)}</strong></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+    if (d.pages > 1) {
+      pager.style.display = 'flex';
+      document.getElementById('bracketPrev').disabled = d.page <= 1;
+      document.getElementById('bracketNext').disabled = d.page >= d.pages;
+      document.getElementById('bracketPagerInfo').textContent = `Page ${d.page} of ${d.pages} · ${fmtNum(d.total)} SKUs`;
+      // override changeBracketPage for this context
+      document.getElementById('bracketPrev').onclick = () => loadUnfulfBracket(unfulfBracketPage - 1);
+      document.getElementById('bracketNext').onclick = () => loadUnfulfBracket(unfulfBracketPage + 1);
+    }
+  } catch(e) {
+    wrap.innerHTML = `<div class="empty-state"><p>Error loading unfulfillable items.</p></div>`;
+    meta.textContent = 'Error';
+  }
 }
 
 // ── RESET ─────────────────────────────────────────────────────────────────────
