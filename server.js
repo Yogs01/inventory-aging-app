@@ -38,6 +38,75 @@ function parseDate(v) {
 function hash(...p) { return crypto.createHash('md5').update(p.join('|')).digest('hex'); }
 function fileHash(fp) { return crypto.createHash('md5').update(fs.readFileSync(fp)).digest('hex'); }
 
+// ─── brand extraction ────────────────────────────────────────────────────────
+const KNOWN_BRANDS = [
+  'Good Smile Company','GOOD SMILE COMPANY','Teenage Mutant Ninja Turtles',
+  'Dungeons & Dragons','Under Armour','Diamond Select','Orange Rouge',
+  'The Loyal Subjects','Max Factory','Square Enix','Games Workshop',
+  'Hiya Toys','Hot Toys','Sen-Ti-Nel','Sen-ti-nel','Warhammer 40k',
+  'Jason Markk','SAXX Underwear Co.','SAXX','Hey Dude','HEYDUDE',
+  'Fjallraven','Hydro Flask','Loungefly','CamelBak','ThreeZero',
+  'Mezco','Funko','FUNKO','Hasbro','Mattel','Bandai','Capcom','NECA',
+  'Megahouse','Furyu','SEGA','Vionic','Timberland','Saucony','Rockport',
+  'Reebok','Merrell','MERRELL','GARMONT','Brooks','K-Swiss','ASICS',
+  'Clarks','Chaco','MARMOT','Kelty','ALTRA','OOFOS','Hestra','Sperry',
+  'DenTek','Sharpie','HOKA','Hoka','KEEN','ECCO','MUCK','Muck',
+  'Smith','SMITH','Cole Haan','adidas','Nike','Veja','Crocs',
+  'Birkenstock','Salomon','Teva','UGG','Bogs','Sorel','Danner','Oboz',
+  'New Balance','Puma','Osprey','Gregory','Deuter','Thule','Patagonia',
+  'Columbia','Arc\'teryx','Cotopaxi','Eagle Creek','Warhammer',
+  'Keds','REEF','Caterpillar','CAT Footwear','On',
+  'Big Agnes','Corkcicle','Nalgene','Yeti','YETI','Stanley',
+  'Smartwool','Darn Tough','Icebreaker','Stance','Bombas',
+  'Carhartt','Pendleton','Filson','Woolrich','Danner',
+  'Sea to Summit','MSR','Black Diamond','Petzl','Mammut',
+  'La Sportiva','Scarpa','Five Ten','Evolv','Mad Rock',
+  'prAna','ExOfficio','Kuhl','Royal Robbins','Nau',
+  'Backcountry','REI','Eddie Bauer','L.L.Bean','Woolrich',
+  'Med Couture','Cherokee','Grey\'s Anatomy','Dickies',
+  'Lululemon','Athleta','Free People','Anthropologie',
+  'Converse','Vans','Skechers','Steve Madden','Sam Edelman',
+  'Dr. Martens','Wolverine','Keen Utility','Thorogood',
+].sort((a, b) => b.length - a.length);
+
+function extractBrandFromName(productName) {
+  if (!productName) return '';
+  const p = productName.trim();
+
+  // 1. Known brand prefix match
+  for (const brand of KNOWN_BRANDS) {
+    if (p.toLowerCase().startsWith(brand.toLowerCase())) return brand;
+  }
+
+  // 2. Known brand anywhere in name (for ALL-CAPS brands like KEEN, HOKA, UGG)
+  for (const brand of KNOWN_BRANDS) {
+    if (brand === brand.toUpperCase() && brand.length >= 3) {
+      const re = new RegExp(`\\b${brand}\\b`, 'i');
+      if (re.test(p)) return brand;
+    }
+  }
+
+  // 3. Chaco Z-model codes
+  if (/^(Z\d|Z\/\d|Z\/X|MEGA Z)/i.test(p)) return 'Chaco';
+
+  // 4. Warhammer keywords
+  const warhammerKeywords = ['XV8','Nurglings','Kill Team','Spearhead','Knight Household',
+    'Horus Heresy','Chaos Space','Space Marine','Age of Sigmar','Blood Angels',
+    'Ork ','Eldar','Necron','Tau ','Tyranid'];
+  for (const kw of warhammerKeywords) {
+    if (p.toLowerCase().includes(kw.toLowerCase())) return 'Warhammer';
+  }
+
+  // 5. "Brand - Product" dash pattern
+  const m = p.match(/^([A-Za-z][^-]{1,30}?)\s*[-–]\s+\S/);
+  if (m) {
+    const c = m[1].trim();
+    if (c.length >= 2 && c.length <= 30) return c;
+  }
+
+  return '';
+}
+
 // ─── record builders ─────────────────────────────────────────────────────────
 function buildAgingRecord(row) {
   const snap = parseDate(row['snapshot-date'] || row['Snapshot Date'] || '');
@@ -71,7 +140,11 @@ function buildAgingRecord(row) {
     sales_rank:              parseNum(row['sales-rank'] || row['Sales Rank'] || null),
     estimated_storage_cost:  parseNum(row['estimated-storage-cost-next-month'] || row['estimated-storage-cost-per-unit'] || row['total-estimated-storage-cost'] || null),
     supplier:                String(row['supplier'] || row['Supplier'] || '').trim(),
-    brand:                   String(row['brand'] || row['Brand'] || '').trim(),
+    brand:                   (() => {
+      const raw = String(row['brand'] || row['Brand'] || '').trim();
+      if (raw && raw !== '-' && raw !== '0') return raw;
+      return extractBrandFromName(String(row['product-name'] || row['Product Name'] || '').trim());
+    })(),
     row_hash:                hash(snap || '', sku, asin),
   };
 }
@@ -90,7 +163,11 @@ function buildUnfulfillableRecord(row) {
     condition:              String(row['condition'] || row['Condition'] || '').trim(),
     unfulfillable_category: category,
     quantity:               parseInt(row['quantity'] || row['Quantity'] || row['qty'] || 0) || 0,
-    brand:                  String(row['brand'] || row['Brand'] || '').trim(),
+    brand:                  (() => {
+      const raw = String(row['brand'] || row['Brand'] || '').trim();
+      if (raw && raw !== '-' && raw !== '0') return raw;
+      return extractBrandFromName(String(row['product-name'] || row['Product Name'] || '').trim());
+    })(),
     supplier:               String(row['supplier'] || row['Supplier'] || '').trim(),
     row_hash:               hash(snap || '', sku, asin, category),
   };
@@ -329,6 +406,33 @@ app.get('/api/items', (req, res) => {
   `).all(...params, limit, offset);
 
   res.json({ records, total, page, pages: Math.ceil(total / limit) });
+});
+
+// ─── GET /api/backfill-brands — fill brand for existing rows with empty brand ──
+app.get('/api/backfill-brands', (req, res) => {
+  const rows = db.prepare(`SELECT rowid, product_name FROM inventory_aging WHERE brand = '' OR brand IS NULL`).all();
+  const update = db.prepare(`UPDATE inventory_aging SET brand = ? WHERE rowid = ?`);
+  let updated = 0;
+  db.transaction(() => {
+    for (const row of rows) {
+      const brand = extractBrandFromName(row.product_name || '');
+      if (brand) { update.run(brand, row.rowid); updated++; }
+    }
+  })();
+
+  // Also backfill unfulfillable table
+  const rows2 = db.prepare(`SELECT rowid, product_name FROM inventory_unfulfillable WHERE brand = '' OR brand IS NULL`).all();
+  const update2 = db.prepare(`UPDATE inventory_unfulfillable SET brand = ? WHERE rowid = ?`);
+  let updated2 = 0;
+  db.transaction(() => {
+    for (const row of rows2) {
+      const brand = extractBrandFromName(row.product_name || '');
+      if (brand) { update2.run(brand, row.rowid); updated2++; }
+    }
+  })();
+
+  console.log(`[backfill-brands] aging=${updated} unfulfillable=${updated2}`);
+  res.json({ success: true, aging_updated: updated, unfulfillable_updated: updated2, total_rows: rows.length });
 });
 
 // ─── GET /api/filters ─────────────────────────────────────────────────────────
