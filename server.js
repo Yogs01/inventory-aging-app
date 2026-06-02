@@ -410,29 +410,44 @@ app.get('/api/items', (req, res) => {
 
 // ─── GET /api/backfill-brands — fill brand for existing rows with empty brand ──
 app.get('/api/backfill-brands', (req, res) => {
+  // Sample check before update
+  const sampleBefore = db.prepare(`SELECT rowid, product_name, brand FROM inventory_aging LIMIT 3`).all();
+
   const rows = db.prepare(`SELECT rowid, product_name FROM inventory_aging WHERE brand = '' OR brand IS NULL`).all();
-  const update = db.prepare(`UPDATE inventory_aging SET brand = ? WHERE rowid = ?`);
-  let updated = 0;
-  db.transaction(() => {
-    for (const row of rows) {
-      const brand = extractBrandFromName(row.product_name || '');
-      if (brand) { update.run(brand, row.rowid); updated++; }
+  let updated = 0, changes = 0;
+  for (const row of rows) {
+    const brand = extractBrandFromName(row.product_name || '');
+    if (brand) {
+      const r = db.prepare(`UPDATE inventory_aging SET brand = ? WHERE rowid = ?`).run(brand, row.rowid);
+      changes += r.changes;
+      updated++;
     }
-  })();
+  }
 
   // Also backfill unfulfillable table
   const rows2 = db.prepare(`SELECT rowid, product_name FROM inventory_unfulfillable WHERE brand = '' OR brand IS NULL`).all();
-  const update2 = db.prepare(`UPDATE inventory_unfulfillable SET brand = ? WHERE rowid = ?`);
   let updated2 = 0;
-  db.transaction(() => {
-    for (const row of rows2) {
-      const brand = extractBrandFromName(row.product_name || '');
-      if (brand) { update2.run(brand, row.rowid); updated2++; }
+  for (const row of rows2) {
+    const brand = extractBrandFromName(row.product_name || '');
+    if (brand) {
+      db.prepare(`UPDATE inventory_unfulfillable SET brand = ? WHERE rowid = ?`).run(brand, row.rowid);
+      updated2++;
     }
-  })();
+  }
 
-  console.log(`[backfill-brands] aging=${updated} unfulfillable=${updated2}`);
-  res.json({ success: true, aging_updated: updated, unfulfillable_updated: updated2, total_rows: rows.length });
+  // Sample check after update
+  const sampleAfter = db.prepare(`SELECT rowid, product_name, brand FROM inventory_aging LIMIT 3`).all();
+
+  console.log(`[backfill-brands] aging matched=${updated} actual_changes=${changes} unfulfillable=${updated2}`);
+  res.json({
+    success: true,
+    aging_matched: updated,
+    actual_db_changes: changes,
+    unfulfillable_updated: updated2,
+    total_empty_rows: rows.length,
+    sample_before: sampleBefore,
+    sample_after: sampleAfter
+  });
 });
 
 // ─── GET /api/filters ─────────────────────────────────────────────────────────
