@@ -215,23 +215,31 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     try {
       // Support both CSV and Excel files
       const isCsv = req.file.originalname.toLowerCase().endsWith('.csv');
-      const wb = isCsv
-        ? XLSX.readFile(req.file.path, { type: 'file', raw: false })
-        : XLSX.readFile(req.file.path, { cellDates: false });
-      console.log(`[${jobId}] type=${isCsv?'csv':'xlsx'} sheets: ${wb.SheetNames.join(', ')}`);
 
-      const readSheet = name => {
-        const s = wb.Sheets[name] || null;
+      // Peek at sheet names only (fast — no cell data)
+      const peekWb = XLSX.readFile(req.file.path, { bookSheets: true });
+      console.log(`[${jobId}] type=${isCsv?'csv':'xlsx'} sheets: ${peekWb.SheetNames.join(', ')}`);
+
+      // CSV = always first sheet; Excel = look for Raw Data / unfulfillable sheets
+      const rawName    = isCsv ? peekWb.SheetNames[0] : (peekWb.SheetNames.find(n => /raw\s*data|raw/i.test(n)) || peekWb.SheetNames[0]);
+      const unfulfName = isCsv ? null : peekWb.SheetNames.find(n => /unfulfill/i.test(n));
+
+      // Fast sheet reader: reads ONE sheet with minimal options, trims keys once
+      const readSheetFast = name => {
+        const wb = XLSX.readFile(req.file.path, {
+          sheets: name, raw: true,
+          cellFormula: false, cellHTML: false, cellNF: false, cellText: false,
+        });
+        const s = wb.Sheets[name];
         if (!s) return [];
-        const raw = XLSX.utils.sheet_to_json(s, { defval: '' });
-        return raw.map(r => Object.fromEntries(Object.entries(r).map(([k,v]) => [k.trim(), v])));
+        const raw = XLSX.utils.sheet_to_json(s, { defval: '', raw: true });
+        if (!raw.length) return raw;
+        const keys = Object.keys(raw[0]), trimmedKeys = keys.map(k => k.trim());
+        const needsTrim = keys.some((k, i) => k !== trimmedKeys[i]);
+        return needsTrim ? raw.map(r => { const o = {}; keys.forEach((k,i)=>{ o[trimmedKeys[i]]=r[k]; }); return o; }) : raw;
       };
 
-      // CSV = always first sheet; Excel = look for Raw Data sheet
-      const rawName = isCsv ? wb.SheetNames[0] : (wb.SheetNames.find(n => /raw\s*data|raw/i.test(n)) || wb.SheetNames[0]);
-      const unfulfName = isCsv ? null : wb.SheetNames.find(n => /unfulfill/i.test(n));
-
-      const rawRows = readSheet(rawName);
+      const rawRows = readSheetFast(rawName);
       console.log(`[${jobId}] raw sheet="${rawName}" rows=${rawRows.length}`);
       if (rawRows[0]) console.log(`[${jobId}] cols:`, Object.keys(rawRows[0]).slice(0,12).join(', '));
 
@@ -247,16 +255,20 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
         }
       }
 
-      db.transaction(rows => {
-        for (const row of rows) {
-          const r = insertAging.run(buildAgingRecord(row));
-          if (r.changes > 0) agingAdded++; else agingSkipped++;
-        }
-      })(rawRows);
+      const BATCH = 3000;
+      for (let i = 0; i < rawRows.length; i += BATCH) {
+        db.transaction(batch => {
+          for (const row of batch) {
+            const r = insertAging.run(buildAgingRecord(row));
+            if (r.changes > 0) agingAdded++; else agingSkipped++;
+          }
+        })(rawRows.slice(i, i + BATCH));
+        job.progress = Math.round((i + BATCH) / rawRows.length * 80);
+      }
       job.progress = 80;
 
       if (unfulfName) {
-        const unfRows = readSheet(unfulfName);
+        const unfRows = readSheetFast(unfulfName);
         console.log(`[${jobId}] unfulfilable sheet="${unfulfName}" rows=${unfRows.length}`);
         db.transaction(rows => {
           for (const row of rows) {
