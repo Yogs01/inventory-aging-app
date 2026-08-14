@@ -160,6 +160,26 @@ tr:hover td{background:var(--bg)}
 .pct-bar-wrap{display:flex;align-items:center;gap:8px}
 .pct-track{height:5px;border-radius:99px;background:var(--border);width:64px;flex-shrink:0}
 .pct-fill{height:100%;border-radius:99px}
+.brand-table tbody tr{cursor:pointer;transition:background .12s}
+.brand-table tbody tr:hover{background:rgba(99,102,241,.07)}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-box{background:var(--card);border-radius:14px;width:100%;max-width:900px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-header h3{font-size:16px;font-weight:700;margin:0}
+.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1;padding:4px 8px;border-radius:6px}
+.modal-close:hover{background:var(--border);color:var(--text)}
+.modal-body{overflow-y:auto;flex:1}
+.modal-body table{width:100%;border-collapse:collapse;font-size:13px}
+.modal-body thead th{position:sticky;top:0;background:var(--card);padding:10px 14px;text-align:right;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+.modal-body thead th:first-child,.modal-body thead th:nth-child(2){text-align:left}
+.modal-body tbody td{padding:9px 14px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+.modal-body tbody td:first-child,.modal-body tbody td:nth-child(2){text-align:left}
+.modal-body tbody tr:last-child td{border-bottom:none}
+.modal-body tbody tr:hover{background:rgba(99,102,241,.05)}
+.modal-asin{font-family:monospace;font-size:12px;color:#6366f1}
+.modal-product{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 </style>
 </head>
 <body>
@@ -361,7 +381,7 @@ tr:hover td{background:var(--bg)}
 <!-- ══ BRANDS ══════════════════════════════════════════════════════════ -->
 <div id="tab-brands" style="display:none">
   <div class="table-card">
-    <div class="table-topbar"><h3>Units by Brand</h3></div>
+    <div class="table-topbar"><h3>Units by Brand <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">Click a brand to see ASINs</span></h3></div>
     <div class="tbl-scroll">
       <table class="brand-table">
         <thead><tr>
@@ -370,6 +390,25 @@ tr:hover td{background:var(--bg)}
           <th>Aged %</th>
         </tr></thead>
         <tbody id="brandBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ BRAND ASIN MODAL ════════════════════════════════════════════════ -->
+<div id="brandModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeBrandModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modalTitle">ASINs</h3>
+      <button class="modal-close" onclick="closeBrandModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <table>
+        <thead><tr>
+          <th>ASIN</th><th>Product</th>
+          <th>Total Units</th><th>0–90d</th><th>91–180d</th><th>180–365d</th><th>365+d</th><th>Removal Qty</th>
+        </tr></thead>
+        <tbody id="modalBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
     </div>
   </div>
@@ -672,7 +711,7 @@ function renderBrandTable(brands) {
     const aged180 = b.aged_180_plus||0;
     const p = b.units>0 ? (aged180/b.units*100).toFixed(1) : 0;
     const color = p>30?'var(--red)':p>15?'var(--orange)':'var(--yellow)';
-    return `<tr>
+    return `<tr onclick="openBrandModal(${JSON.stringify(b.brand)})">
       <td><strong>${esc(b.brand)}</strong></td>
       <td>${fmtNum(b.skus)}</td>
       <td>${fmtNum(b.units)}</td>
@@ -684,6 +723,46 @@ function renderBrandTable(brands) {
     </tr>`;
   }).join('');
 }
+
+// ── BRAND ASIN MODAL ──────────────────────────────────────────────────────────
+async function openBrandModal(brand) {
+  document.getElementById('modalTitle').textContent = brand + ' — ASINs';
+  document.getElementById('modalBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>';
+  document.getElementById('brandModal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  const snap = document.getElementById('snapshotSelect')?.value || '';
+  const params = new URLSearchParams({ brand, ...(snap ? { snapshot: snap } : {}) });
+  const d = await fetch('/api/brand-asins?' + params).then(r => r.json());
+
+  if (!d.records || !d.records.length) {
+    document.getElementById('modalBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted)">No ASINs found.</td></tr>';
+    return;
+  }
+
+  document.getElementById('modalBody').innerHTML = d.records.map(r => {
+    const aged365 = r.age_365_plus||0;
+    const aged180 = r.age_180_365||0;
+    const ageColor = aged365>0?'color:var(--red)':aged180>0?'color:var(--orange)':'';
+    return `<tr>
+      <td><span class="modal-asin">${esc(r.asin||'—')}</span></td>
+      <td><div class="modal-product" title="${esc(r.product_name||'')}">${esc(r.product_name||'—')}</div></td>
+      <td>${fmtNum(r.total_units)}</td>
+      <td>${fmtNum(r.age_0_90)}</td>
+      <td>${fmtNum(r.age_91_180)}</td>
+      <td style="${aged180>0?'color:var(--orange)':''}">${fmtNum(aged180)}</td>
+      <td style="${aged365>0?'color:var(--red);font-weight:600':''}">${fmtNum(aged365)||'—'}</td>
+      <td style="${r.removal_qty>0?'color:var(--red)':''}">${r.removal_qty>0?fmtNum(r.removal_qty):'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function closeBrandModal() {
+  document.getElementById('brandModal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBrandModal(); });
 
 function renderEmpty() {
   document.getElementById('metricsWrap').innerHTML = `<div style="grid-column:1/-1" class="empty-state"><h3>No inventory data</h3><p>Go to the Upload tab and upload your Amazon FBA Inventory Age report.</p></div>`;

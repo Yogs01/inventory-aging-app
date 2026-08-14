@@ -464,6 +464,33 @@ app.get('/api/backfill-brands', (req, res) => {
   });
 });
 
+// ─── GET /api/brand-asins?brand=&snapshot= ───────────────────────────────────
+app.get('/api/brand-asins', (req, res) => {
+  const brand = req.query.brand || '';
+  const snap  = req.query.snapshot || '';
+  if (!brand) return res.status(400).json({ error: 'brand required' });
+
+  const latestSnap = db.prepare(`SELECT MAX(snapshot_date) as d FROM inventory_aging`).get()?.d || '';
+  const useSnap = snap || latestSnap;
+
+  const records = db.prepare(`
+    SELECT asin, sku, product_name,
+      SUM(age_0_90+age_91_180+age_181_270+age_271_365+age_365_455+age_455_plus) as total_units,
+      SUM(age_0_90) as age_0_90,
+      SUM(age_91_180) as age_91_180,
+      SUM(age_181_270+age_271_365) as age_180_365,
+      SUM(age_365_455+age_455_plus) as age_365_plus,
+      SUM(recommended_removal_qty) as removal_qty,
+      your_price
+    FROM inventory_aging
+    WHERE snapshot_date = ? AND brand = ? AND asin != ''
+    GROUP BY asin
+    ORDER BY (age_181_270+age_271_365+age_365_455+age_455_plus) DESC, total_units DESC
+  `).all(useSnap, brand);
+
+  res.json({ brand, snapshot: useSnap, records });
+});
+
 // ─── GET /api/filters ─────────────────────────────────────────────────────────
 app.get('/api/filters', (req, res) => {
   const latestSnap = db.prepare(`SELECT MAX(snapshot_date) as d FROM inventory_aging`).get()?.d || '';
