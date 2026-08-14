@@ -300,6 +300,51 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   });
 });
 
+// ─── POST /api/upload-costs — import SellerSnap CSV cost data ────────────────
+app.post('/api/upload-costs', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const wb = XLSX.readFile(req.file.path, { raw: true, cellFormula: false, cellHTML: false });
+    const sheetName = wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+
+    const upsert = db.prepare(`
+      INSERT INTO product_costs (sku, fnsku, asin, title, cost, last_purchase_price, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(sku) DO UPDATE SET
+        fnsku = excluded.fnsku,
+        asin  = excluded.asin,
+        title = excluded.title,
+        cost  = excluded.cost,
+        last_purchase_price = excluded.last_purchase_price,
+        updated_at = datetime('now')
+    `);
+
+    let upserted = 0, skipped = 0;
+    db.transaction(rows => {
+      for (const r of rows) {
+        const sku  = String(r.sku  || '').trim();
+        const fnsku = String(r.fnsku || '').trim();
+        const asin  = String(r.asin  || '').trim();
+        const title = String(r.title || '').trim();
+        const cost  = parseNum(r.cost);
+        const lpp   = parseNum(r.last_purchase_price);
+        if (!sku && !asin) { skipped++; continue; }
+        // Use sku as primary key; if no sku, fall back to asin
+        const key = sku || asin;
+        upsert.run(key, fnsku, asin, title, cost, lpp);
+        upserted++;
+      }
+    })(rows);
+
+    try { fs.unlinkSync(req.file.path); } catch(_) {}
+    res.json({ success: true, upserted, skipped, total: rows.length });
+  } catch(e) {
+    try { fs.unlinkSync(req.file.path); } catch(_) {}
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── POST /api/import — batch import from seed script ────────────────────────
 app.post('/api/import', (req, res) => {
   const rows = req.body.rows;
@@ -358,11 +403,20 @@ app.get('/api/stats', (req, res) => {
   `).all(...params);
 
   const byBrand = db.prepare(`
-    SELECT brand, COUNT(*) as skus, SUM(available) as units,
-      SUM(age_0_90) as age_0_90, SUM(age_91_180) as age_91_180,
-      SUM(age_181_270+age_271_365+age_365_455+age_455_plus) as aged_180_plus
-    FROM inventory_aging WHERE ${cond} AND brand != ''
-    GROUP BY brand ORDER BY units DESC LIMIT 20
+    SELECT ia.brand, COUNT(*) as skus,
+      SUM(ia.available) as units,
+      SUM(ia.age_0_90) as age_0_90,
+      SUM(ia.age_91_180) as age_91_180,
+      SUM(ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) as aged_180_plus,
+      ROUND(SUM(
+        COALESCE(pc_sku.cost, pc_asin.cost, 0) *
+        (ia.age_0_90+ia.age_91_180+ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus)
+      ), 2) as inv_value
+    FROM inventory_aging ia
+    LEFT JOIN product_costs pc_sku  ON pc_sku.sku  = ia.sku
+    LEFT JOIN product_costs pc_asin ON pc_asin.asin = ia.asin AND pc_sku.sku IS NULL
+    WHERE ia.snapshot_date ${snap ? '= ?' : '= (SELECT MAX(snapshot_date) FROM inventory_aging)'} AND ia.brand != ''
+    GROUP BY ia.brand ORDER BY units DESC LIMIT 20
   `).all(...params);
 
   const byStorage = db.prepare(`
@@ -474,18 +528,26 @@ app.get('/api/brand-asins', (req, res) => {
   const useSnap = snap || latestSnap;
 
   const records = db.prepare(`
-    SELECT asin, sku, product_name,
-      SUM(age_0_90+age_91_180+age_181_270+age_271_365+age_365_455+age_455_plus) as total_units,
-      SUM(age_0_90) as age_0_90,
-      SUM(age_91_180) as age_91_180,
-      SUM(age_181_270+age_271_365) as age_180_365,
-      SUM(age_365_455+age_455_plus) as age_365_plus,
-      SUM(recommended_removal_qty) as removal_qty,
-      your_price
-    FROM inventory_aging
-    WHERE snapshot_date = ? AND brand = ? AND asin != ''
-    GROUP BY asin
-    ORDER BY (age_181_270+age_271_365+age_365_455+age_455_plus) DESC, total_units DESC
+    SELECT
+      ia.asin, ia.sku, ia.product_name,
+      SUM(ia.age_0_90+ia.age_91_180+ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) as total_units,
+      SUM(ia.age_0_90)   as age_0_90,
+      SUM(ia.age_91_180) as age_91_180,
+      SUM(ia.age_181_270+ia.age_271_365)    as age_180_365,
+      SUM(ia.age_365_455+ia.age_455_plus)   as age_365_plus,
+      SUM(ia.recommended_removal_qty)       as removal_qty,
+      ia.your_price,
+      COALESCE(pc_sku.cost, pc_asin.cost)   as cost,
+      ROUND(
+        COALESCE(pc_sku.cost, pc_asin.cost, 0) *
+        SUM(ia.age_0_90+ia.age_91_180+ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus),
+      2) as inv_value
+    FROM inventory_aging ia
+    LEFT JOIN product_costs pc_sku  ON pc_sku.sku  = ia.sku
+    LEFT JOIN product_costs pc_asin ON pc_asin.asin = ia.asin AND pc_sku.sku IS NULL
+    WHERE ia.snapshot_date = ? AND ia.brand = ? AND ia.asin != ''
+    GROUP BY ia.asin
+    ORDER BY (ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) DESC, total_units DESC
   `).all(useSnap, brand);
 
   res.json({ brand, snapshot: useSnap, records });

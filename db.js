@@ -61,11 +61,24 @@ db.exec(`
     uploaded_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS product_costs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT UNIQUE,
+    fnsku TEXT,
+    asin TEXT,
+    title TEXT,
+    cost REAL,
+    last_purchase_price REAL,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_aging_snapshot ON inventory_aging(snapshot_date);
   CREATE INDEX IF NOT EXISTS idx_aging_sku ON inventory_aging(sku);
   CREATE INDEX IF NOT EXISTS idx_aging_brand ON inventory_aging(brand);
   CREATE INDEX IF NOT EXISTS idx_aging_action ON inventory_aging(recommended_action);
   CREATE INDEX IF NOT EXISTS idx_aging_storage ON inventory_aging(storage_type);
+  CREATE INDEX IF NOT EXISTS idx_costs_sku  ON product_costs(sku);
+  CREATE INDEX IF NOT EXISTS idx_costs_asin ON product_costs(asin);
 `);
 
 module.exports = db;

@@ -402,7 +402,7 @@ tr:hover td{background:var(--bg)}
         <thead><tr>
           <th>Brand</th><th>SKUs</th><th>Total Units</th>
           <th>0–90d</th><th>91–180d</th><th>180–365d</th><th>365+d</th>
-          <th>Aged %</th>
+          <th>Aged %</th><th>Inv. Value</th>
         </tr></thead>
         <tbody id="brandBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
@@ -419,7 +419,7 @@ tr:hover td{background:var(--bg)}
     </div>
     <div class="modal-body">
       <table>
-        <colgroup><col><col><col><col><col><col><col><col></colgroup>
+        <colgroup><col><col><col><col><col><col><col><col><col><col></colgroup>
         <thead id="modalThead"><tr>
           <th class="modal-th" data-col="asin" data-type="str" style="text-align:left">ASIN <span class="sort-icon">↕</span></th>
           <th class="modal-th" data-col="product_name" data-type="str" style="text-align:left">Product <span class="sort-icon">↕</span></th>
@@ -429,6 +429,8 @@ tr:hover td{background:var(--bg)}
           <th class="modal-th" data-col="age_180_365" data-type="num" style="text-align:right">180–365d <span class="sort-icon">↕</span></th>
           <th class="modal-th" data-col="age_365_plus" data-type="num" style="text-align:right">365+d <span class="sort-icon">↕</span></th>
           <th class="modal-th" data-col="removal_qty" data-type="num" style="text-align:right">Removal Qty <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="cost" data-type="num" style="text-align:right">Unit Cost <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="inv_value" data-type="num" style="text-align:right">Inv. Value <span class="sort-icon">↕</span></th>
         </tr></thead>
         <tbody id="modalBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
@@ -438,19 +440,40 @@ tr:hover td{background:var(--bg)}
 
 <!-- ══ UPLOAD ══════════════════════════════════════════════════════════ -->
 <div id="tab-upload" style="display:none">
-  <div class="upload-zone" id="uploadZone"
-       onclick="document.getElementById('fileInput').click()"
-       ondragover="event.preventDefault();this.classList.add('drag')"
-       ondragleave="this.classList.remove('drag')"
-       ondrop="handleDrop(event)">
-    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.txt,.tsv" onchange="uploadFile(this.files[0])"/>
-    <h3>Upload FBA Inventory Age Report</h3>
-    <p>Drag & drop or click to browse<br/>
-       <strong>CSV</strong> from Amazon Seller Central: Reports → Fulfillment → FBA Inventory → Inventory Age<br/>
-       Re-uploading the same date replaces existing data automatically.</p>
-    <div class="upload-cta">Choose File</div>
-    <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
-    <div id="uploadStatus"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+
+    <!-- FBA Inventory Age Report -->
+    <div class="upload-zone" id="uploadZone"
+         onclick="document.getElementById('fileInput').click()"
+         ondragover="event.preventDefault();this.classList.add('drag')"
+         ondragleave="this.classList.remove('drag')"
+         ondrop="handleDrop(event)">
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.txt,.tsv" onchange="uploadFile(this.files[0])"/>
+      <div style="font-size:28px;margin-bottom:10px">📦</div>
+      <h3>FBA Inventory Age Report</h3>
+      <p style="margin:8px 0 14px">Drag & drop or click to browse<br/>
+         <strong>CSV</strong> from Amazon Seller Central:<br/>Reports → Fulfillment → FBA Inventory → Inventory Age</p>
+      <div class="upload-cta">Choose File</div>
+      <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+      <div id="uploadStatus"></div>
+    </div>
+
+    <!-- SellerSnap Cost Data -->
+    <div class="upload-zone" id="costsZone"
+         onclick="document.getElementById('costsInput').click()"
+         ondragover="event.preventDefault();this.classList.add('drag')"
+         ondragleave="this.classList.remove('drag')"
+         ondrop="handleCostsDrop(event)">
+      <input type="file" id="costsInput" accept=".csv,.xlsx,.xls" onchange="uploadCosts(this.files[0])"/>
+      <div style="font-size:28px;margin-bottom:10px">💰</div>
+      <h3>SellerSnap Cost Data</h3>
+      <p style="margin:8px 0 14px">Drag & drop or click to browse<br/>
+         <strong>CSV</strong> export from SellerSnap<br/>Used to calculate inventory dollar value</p>
+      <div class="upload-cta">Choose File</div>
+      <div id="costsStatus" style="margin-top:10px;font-size:13px"></div>
+    </div>
+
   </div>
 
   <div class="table-card upload-hist" id="uploadHistCard">
@@ -492,6 +515,25 @@ function handleDrop(e) {
   e.preventDefault();
   document.getElementById('uploadZone').classList.remove('drag');
   if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+}
+function handleCostsDrop(e) {
+  e.preventDefault();
+  document.getElementById('costsZone').classList.remove('drag');
+  if (e.dataTransfer.files[0]) uploadCosts(e.dataTransfer.files[0]);
+}
+async function uploadCosts(file) {
+  if (!file) return;
+  const status = document.getElementById('costsStatus');
+  status.innerHTML = `<span style="color:#6b7280">Uploading ${file.name}…</span>`;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/upload-costs', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!d.success) { status.innerHTML = `<span style="color:#dc2626">❌ ${d.error||'Upload failed'}</span>`; return; }
+    status.innerHTML = `<span style="color:#16a34a">✅ ${d.upserted.toLocaleString()} SKUs updated with cost data</span>`;
+    loadDashboard();
+  } catch(e) { status.innerHTML = `<span style="color:#dc2626">❌ ${e.message}</span>`; }
 }
 async function uploadFile(file) {
   if (!file) return;
@@ -733,6 +775,7 @@ function renderBrandTable(brands) {
     const aged180 = b.aged_180_plus||0;
     const p = b.units>0 ? (aged180/b.units*100).toFixed(1) : 0;
     const color = p>30?'var(--red)':p>15?'var(--orange)':'var(--yellow)';
+    const val = b.inv_value > 0 ? '$' + Number(b.inv_value).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '<span style="color:#d1d5db">—</span>';
     return `<tr data-brand="${esc(b.brand)}">
       <td><strong>${esc(b.brand)}</strong></td>
       <td>${fmtNum(b.skus)}</td>
@@ -742,6 +785,7 @@ function renderBrandTable(brands) {
       <td style="${aged180>0?'color:var(--orange)':''}">${fmtNum(aged180)}</td>
       <td>—</td>
       <td><div class="pct-bar-wrap"><div class="pct-track"><div class="pct-fill" style="width:${Math.min(+p,100)}%;background:${color}"></div></div><span style="color:${color};font-weight:600">${p}%</span></div></td>
+      <td style="font-weight:500">${val}</td>
     </tr>`;
   }).join('');
 }
@@ -805,7 +849,8 @@ function renderModalRows() {
     return dir === 'asc' ? cmp : -cmp;
   });
 
-  const n = v => v > 0 ? `<span class="modal-num-normal">${fmtNum(v)}</span>` : `<span class="modal-num-zero">—</span>`;
+  const n   = v => v > 0 ? `<span class="modal-num-normal">${fmtNum(v)}</span>` : `<span class="modal-num-zero">—</span>`;
+  const fmtD = v => v != null && v > 0 ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '<span class="modal-num-zero">—</span>';
   document.getElementById('modalBody').innerHTML = sorted.map(r => {
     const aged365 = r.age_365_plus||0;
     const aged180 = r.age_180_365||0;
@@ -818,6 +863,8 @@ function renderModalRows() {
       <td>${aged180>0?`<span style="color:#ea580c;font-weight:500">${fmtNum(aged180)}</span>`:'<span class="modal-num-zero">—</span>'}</td>
       <td>${aged365>0?`<span style="color:#dc2626;font-weight:600">${fmtNum(aged365)}</span>`:'<span class="modal-num-zero">—</span>'}</td>
       <td>${r.removal_qty>0?`<span style="color:#dc2626">${fmtNum(r.removal_qty)}</span>`:'<span class="modal-num-zero">—</span>'}</td>
+      <td>${fmtD(r.cost)}</td>
+      <td style="${r.inv_value>0?'font-weight:600;color:#111':''}">${fmtD(r.inv_value)}</td>
     </tr>`;
   }).join('');
 }
