@@ -403,7 +403,7 @@ tr:hover td{background:var(--bg)}
     <div class="table-topbar"><h3>Units by Brand <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">Click a brand to see ASINs</span></h3></div>
     <div class="tbl-scroll">
       <table class="brand-table">
-        <thead><tr>
+        <thead id="brandThead"><tr>
           <th>Brand</th><th>SKUs</th><th>Total Units</th>
           <th>0–90d</th><th>91–180d</th><th>180–365d</th><th>365+d</th>
           <th>Aged %</th><th>Inv. Value</th>
@@ -509,6 +509,8 @@ let _aged365Sort = { col: '', dir: 'desc' };
 let _aged180Sort = { col: '', dir: 'desc' };
 let _flaggedSort = { col: '', dir: 'desc' };
 let _bracketSort = { col: '', dir: 'desc' };
+let _brandSort   = { col: '', dir: 'desc' };
+let _brandData   = [];
 
 const fmtVal = v => v > 0
   ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
@@ -543,6 +545,10 @@ function setFlaggedSort(col) {
 function setBracketSort(col) {
   _bracketSort.dir = _bracketSort.col===col ? (_bracketSort.dir==='desc'?'asc':'desc') : 'desc';
   _bracketSort.col = col; loadBracketSKUs(bracketAged, bracketLabel, 1);
+}
+function setBrandSort(col) {
+  _brandSort.dir = _brandSort.col===col ? (_brandSort.dir==='desc'?'asc':'desc') : 'desc';
+  _brandSort.col = col; renderBrandTable(_brandData);
 }
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
@@ -634,6 +640,7 @@ async function loadDashboard() {
   _aged180Sort = { col: '', dir: 'desc' };
   _flaggedSort = { col: '', dir: 'desc' };
   _bracketSort = { col: '', dir: 'desc' };
+  _brandSort   = { col: '', dir: 'desc' };
   await loadSnapshots();
   await loadStats();
   await loadFilters();
@@ -850,23 +857,58 @@ function debounceItems() { clearTimeout(debTimer); debTimer = setTimeout(()=>loa
 // ── BRAND TABLE ───────────────────────────────────────────────────────────────
 function renderBrandTable(brands) {
   if (!brands.length) return;
-  document.getElementById('brandBody').innerHTML = brands.map(b => {
-    const aged180  = b.aged_180_plus||0;
-    const aged365  = b.age_365_plus||0;
+  _brandData = brands;
+
+  const s = _brandSort;
+  const bTh = (label, col, align='right') => {
+    const active = s.col === col;
+    const icon = active
+      ? `<span style="margin-left:3px;font-size:10px;color:#6366f1">${s.dir==='asc'?'↑':'↓'}</span>`
+      : '<span style="margin-left:3px;font-size:10px;opacity:.3">↕</span>';
+    return `<th style="text-align:${align};cursor:pointer;user-select:none;white-space:nowrap" onclick="setBrandSort('${col}')">${label}${icon}</th>`;
+  };
+  document.getElementById('brandThead').innerHTML = `<tr>
+    ${bTh('Brand','brand','left')}
+    ${bTh('SKUs','skus')}
+    ${bTh('Total Units','units')}
+    ${bTh('0–90d','age_0_90')}
+    ${bTh('91–180d','age_91_180')}
+    ${bTh('180–365d','aged_180_365')}
+    ${bTh('365+d','age_365_plus')}
+    ${bTh('Aged %','aged_180_plus')}
+    ${bTh('Inv. Value','inv_value')}
+  </tr>`;
+
+  let sorted = [...brands];
+  if (s.col) {
+    sorted.sort((a, b) => {
+      if (s.col === 'brand') {
+        const cmp = (a.brand||'').localeCompare(b.brand||'');
+        return s.dir === 'asc' ? cmp : -cmp;
+      }
+      const av = s.col === 'aged_180_365' ? (a.aged_180_plus||0)-(a.age_365_plus||0) : (a[s.col]||0);
+      const bv = s.col === 'aged_180_365' ? (b.aged_180_plus||0)-(b.age_365_plus||0) : (b[s.col]||0);
+      return s.dir === 'asc' ? av - bv : bv - av;
+    });
+  }
+
+  document.getElementById('brandBody').innerHTML = sorted.map(b => {
+    const aged180     = b.aged_180_plus||0;
+    const aged365     = b.age_365_plus||0;
     const aged180_365 = aged180 - aged365;
     const p = b.units>0 ? (aged180/b.units*100).toFixed(1) : 0;
     const color = p>30?'var(--red)':p>15?'var(--orange)':'var(--yellow)';
     const val = b.inv_value > 0 ? '$' + Number(b.inv_value).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '<span style="color:#d1d5db">—</span>';
     return `<tr data-brand="${esc(b.brand)}">
       <td><strong>${esc(b.brand)}</strong></td>
-      <td>${fmtNum(b.skus)}</td>
-      <td>${fmtNum(b.units)}</td>
-      <td>${fmtNum(b.age_0_90)}</td>
-      <td>${fmtNum(b.age_91_180)}</td>
-      <td style="${aged180_365>0?'color:var(--orange)':''}">${aged180_365>0?fmtNum(aged180_365):'—'}</td>
-      <td style="${aged365>0?'color:var(--red);font-weight:600':''}">${aged365>0?fmtNum(aged365):'—'}</td>
+      <td style="text-align:right">${fmtNum(b.skus)}</td>
+      <td style="text-align:right">${fmtNum(b.units)}</td>
+      <td style="text-align:right">${fmtNum(b.age_0_90)}</td>
+      <td style="text-align:right">${fmtNum(b.age_91_180)}</td>
+      <td style="text-align:right;${aged180_365>0?'color:var(--orange)':''}">${aged180_365>0?fmtNum(aged180_365):'—'}</td>
+      <td style="text-align:right;${aged365>0?'color:var(--red);font-weight:600':''}">${aged365>0?fmtNum(aged365):'—'}</td>
       <td><div class="pct-bar-wrap"><div class="pct-track"><div class="pct-fill" style="width:${Math.min(+p,100)}%;background:${color}"></div></div><span style="color:${color};font-weight:600">${p}%</span></div></td>
-      <td style="font-weight:500">${val}</td>
+      <td style="text-align:right;font-weight:500">${val}</td>
     </tr>`;
   }).join('');
 }
