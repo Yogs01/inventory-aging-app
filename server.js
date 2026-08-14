@@ -408,6 +408,7 @@ app.get('/api/stats', (req, res) => {
       SUM(ia.age_0_90) as age_0_90,
       SUM(ia.age_91_180) as age_91_180,
       SUM(ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) as aged_180_plus,
+      SUM(ia.age_365_455+ia.age_455_plus) as age_365_plus,
       ROUND(SUM(
         COALESCE(pc_sku.cost, pc_asin.cost, 0) *
         (ia.age_0_90+ia.age_91_180+ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus)

@@ -145,9 +145,11 @@ tr:hover td{background:var(--bg)}
 .progress-bar{background:var(--accent);height:100%;border-radius:99px;width:0%;transition:width .3s}
 #uploadStatus{margin-top:10px;font-size:13px;color:var(--muted)}
 #fileInput{display:none}
+#costsInput{display:none}
 
 /* ── HISTORY TABLE ── */
 .upload-hist{display:none}
+@media(max-width:640px){.upload-grid{grid-template-columns:1fr!important}}
 
 /* ── LOADING / EMPTY ── */
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
@@ -181,6 +183,8 @@ tr:hover td{background:var(--bg)}
 .modal-body colgroup col:nth-child(6){width:82px}
 .modal-body colgroup col:nth-child(7){width:70px}
 .modal-body colgroup col:nth-child(8){width:96px}
+.modal-body colgroup col:nth-child(9){width:80px}
+.modal-body colgroup col:nth-child(10){width:90px}
 .modal-body thead th{position:sticky;top:0;z-index:2;background:#fafafa;padding:9px 14px;text-align:right;font-size:10.5px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #f0f0f0;white-space:nowrap}
 .modal-body thead th:first-child,.modal-body thead th:nth-child(2){text-align:left}
 .modal-body tbody td{padding:10px 14px;border-bottom:1px solid #f5f5f5;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#374151}
@@ -404,7 +408,7 @@ tr:hover td{background:var(--bg)}
           <th>0–90d</th><th>91–180d</th><th>180–365d</th><th>365+d</th>
           <th>Aged %</th><th>Inv. Value</th>
         </tr></thead>
-        <tbody id="brandBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
+        <tbody id="brandBody"><tr><td colspan="9" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
     </div>
   </div>
@@ -432,7 +436,7 @@ tr:hover td{background:var(--bg)}
           <th class="modal-th" data-col="cost" data-type="num" style="text-align:right">Unit Cost <span class="sort-icon">↕</span></th>
           <th class="modal-th" data-col="inv_value" data-type="num" style="text-align:right">Inv. Value <span class="sort-icon">↕</span></th>
         </tr></thead>
-        <tbody id="modalBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
+        <tbody id="modalBody"><tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
     </div>
   </div>
@@ -441,7 +445,7 @@ tr:hover td{background:var(--bg)}
 <!-- ══ UPLOAD ══════════════════════════════════════════════════════════ -->
 <div id="tab-upload" style="display:none">
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px" class="upload-grid">
 
     <!-- FBA Inventory Age Report -->
     <div class="upload-zone" id="uploadZone"
@@ -772,7 +776,9 @@ function debounceItems() { clearTimeout(debTimer); debTimer = setTimeout(()=>loa
 function renderBrandTable(brands) {
   if (!brands.length) return;
   document.getElementById('brandBody').innerHTML = brands.map(b => {
-    const aged180 = b.aged_180_plus||0;
+    const aged180  = b.aged_180_plus||0;
+    const aged365  = b.age_365_plus||0;
+    const aged180_365 = aged180 - aged365;
     const p = b.units>0 ? (aged180/b.units*100).toFixed(1) : 0;
     const color = p>30?'var(--red)':p>15?'var(--orange)':'var(--yellow)';
     const val = b.inv_value > 0 ? '$' + Number(b.inv_value).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '<span style="color:#d1d5db">—</span>';
@@ -782,8 +788,8 @@ function renderBrandTable(brands) {
       <td>${fmtNum(b.units)}</td>
       <td>${fmtNum(b.age_0_90)}</td>
       <td>${fmtNum(b.age_91_180)}</td>
-      <td style="${aged180>0?'color:var(--orange)':''}">${fmtNum(aged180)}</td>
-      <td>—</td>
+      <td style="${aged180_365>0?'color:var(--orange)':''}">${aged180_365>0?fmtNum(aged180_365):'—'}</td>
+      <td style="${aged365>0?'color:var(--red);font-weight:600':''}">${aged365>0?fmtNum(aged365):'—'}</td>
       <td><div class="pct-bar-wrap"><div class="pct-track"><div class="pct-fill" style="width:${Math.min(+p,100)}%;background:${color}"></div></div><span style="color:${color};font-weight:600">${p}%</span></div></td>
       <td style="font-weight:500">${val}</td>
     </tr>`;
@@ -813,7 +819,7 @@ document.getElementById('modalThead').addEventListener('click', e => {
 
 async function openBrandModal(brand) {
   document.getElementById('modalTitle').innerHTML = `${esc(brand)} <span style="font-weight:400;color:#9ca3af;font-size:13px">— ASINs</span>`;
-  document.getElementById('modalBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>';
+  document.getElementById('modalBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>';
   document.getElementById('brandModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   _modalSort = { col: 'age_180_365', dir: 'desc' };
@@ -823,7 +829,7 @@ async function openBrandModal(brand) {
   const d = await fetch('/api/brand-asins?' + params).then(r => r.json());
 
   if (!d.records || !d.records.length) {
-    document.getElementById('modalBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted)">No ASINs found.</td></tr>';
+    document.getElementById('modalBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)">No ASINs found.</td></tr>';
     return;
   }
 
