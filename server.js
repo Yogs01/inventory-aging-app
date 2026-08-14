@@ -440,34 +440,55 @@ app.get('/api/items', (req, res) => {
   const action  = req.query.action || '';
   const storage = req.query.storage || '';
   const aged    = req.query.aged || '';
+  const sortReq = req.query.sort || '';
+  const dirReq  = req.query.dir  || '';
 
   const latestSnap = db.prepare(`SELECT MAX(snapshot_date) as d FROM inventory_aging`).get()?.d || '';
   const useSnap = snap || latestSnap;
 
-  let where = 'WHERE snapshot_date = ?';
+  let where = 'WHERE ia.snapshot_date = ?';
   const params = [useSnap];
-  if (search)  { where += ' AND (product_name LIKE ? OR sku LIKE ? OR asin LIKE ?)'; params.push(`%${search}%`,`%${search}%`,`%${search}%`); }
-  if (brand)   { where += ' AND brand = ?'; params.push(brand); }
-  if (action)  { where += ' AND recommended_action = ?'; params.push(action); }
-  if (storage) { where += ' AND storage_type = ?'; params.push(storage); }
-  if (aged === '0')   { where += ' AND age_0_90 > 0'; }
-  if (aged === '91')  { where += ' AND age_91_180 > 0'; }
-  if (aged === '181') { where += ' AND age_181_270 > 0'; }
-  if (aged === '271') { where += ' AND age_271_365 > 0'; }
-  if (aged === '90')  { where += ' AND (age_91_180+age_181_270+age_271_365+age_365_455+age_455_plus) > 0'; }
-  if (aged === '180') { where += ' AND (age_181_270+age_271_365+age_365_455+age_455_plus) > 0'; }
-  if (aged === '365') { where += ' AND (age_365_455+age_455_plus) > 0'; }
+  if (search)  { where += ' AND (ia.product_name LIKE ? OR ia.sku LIKE ? OR ia.asin LIKE ?)'; params.push(`%${search}%`,`%${search}%`,`%${search}%`); }
+  if (brand)   { where += ' AND ia.brand = ?'; params.push(brand); }
+  if (action)  { where += ' AND ia.recommended_action = ?'; params.push(action); }
+  if (storage) { where += ' AND ia.storage_type = ?'; params.push(storage); }
+  if (aged === '0')   { where += ' AND ia.age_0_90 > 0'; }
+  if (aged === '91')  { where += ' AND ia.age_91_180 > 0'; }
+  if (aged === '181') { where += ' AND ia.age_181_270 > 0'; }
+  if (aged === '271') { where += ' AND ia.age_271_365 > 0'; }
+  if (aged === '90')  { where += ' AND (ia.age_91_180+ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) > 0'; }
+  if (aged === '180') { where += ' AND (ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) > 0'; }
+  if (aged === '365') { where += ' AND (ia.age_365_455+ia.age_455_plus) > 0'; }
 
-  // Order by the relevant age bracket depending on filter
-  const orderBy = aged === '0'   ? 'age_0_90 DESC'
-                : aged === '91'  ? 'age_91_180 DESC'
-                : aged === '181' ? 'age_181_270 DESC'
-                : aged === '271' ? 'age_271_365 DESC'
-                : '(age_181_270+age_271_365+age_365_455+age_455_plus) DESC, available DESC';
+  const VALID_SORTS = {
+    product_name:'ia.product_name', brand:'ia.brand', available:'ia.available',
+    age_0_90:'ia.age_0_90', age_91_180:'ia.age_91_180',
+    age_181_270:'ia.age_181_270', age_271_365:'ia.age_271_365',
+    age_365_455:'ia.age_365_455', age_455_plus:'ia.age_455_plus',
+    sold_t30:'ia.sold_t30', inv_value:'inv_value'
+  };
 
-  const total   = db.prepare(`SELECT COUNT(*) as n FROM inventory_aging ${where}`).get(...params).n;
+  const defaultOrderBy = aged === '0'   ? 'ia.age_0_90 DESC'
+                       : aged === '91'  ? 'ia.age_91_180 DESC'
+                       : aged === '181' ? 'ia.age_181_270 DESC'
+                       : aged === '271' ? 'ia.age_271_365 DESC'
+                       : '(ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus) DESC, ia.available DESC';
+
+  const sortDir = dirReq === 'asc' ? 'ASC' : 'DESC';
+  const orderBy = VALID_SORTS[sortReq]
+    ? `${VALID_SORTS[sortReq]} ${sortDir} NULLS LAST`
+    : defaultOrderBy;
+
+  const total   = db.prepare(`SELECT COUNT(*) as n FROM inventory_aging ia ${where}`).get(...params).n;
   const records = db.prepare(`
-    SELECT * FROM inventory_aging ${where}
+    SELECT ia.*,
+      COALESCE(pc_sku.cost, pc_asin.cost) as cost,
+      ROUND(COALESCE(pc_sku.cost, pc_asin.cost, 0) *
+        (ia.age_0_90+ia.age_91_180+ia.age_181_270+ia.age_271_365+ia.age_365_455+ia.age_455_plus), 2) as inv_value
+    FROM inventory_aging ia
+    LEFT JOIN product_costs pc_sku  ON pc_sku.sku  = ia.sku
+    LEFT JOIN product_costs pc_asin ON pc_asin.asin = ia.asin AND pc_sku.sku IS NULL
+    ${where}
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);

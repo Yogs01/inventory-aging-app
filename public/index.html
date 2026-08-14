@@ -297,9 +297,9 @@ tr:hover td{background:var(--bg)}
     </div>
     <div class="tbl-scroll">
       <table>
-        <thead><tr>
+        <thead id="flaggedThead"><tr>
           <th>Product</th><th>FNSKU</th><th>ASIN</th><th>SKU</th><th>Brand</th>
-          <th>365–455d</th><th>455+d</th><th>Total 365+</th><th>Action</th>
+          <th>365–455d</th><th>455+d</th><th>Total 365+</th><th>Inv. Value</th><th>Action</th>
         </tr></thead>
         <tbody id="flaggedBody"></tbody>
       </table>
@@ -328,7 +328,7 @@ tr:hover td{background:var(--bg)}
       </div>
     </div>
     <div class="tbl-scroll" id="skuTableWrap">
-      <table><tbody><tr><td colspan="11" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>
+      <table><tbody><tr><td colspan="12" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>
     </div>
     <div class="pager" id="pager" style="display:none">
       <button id="prevBtn" onclick="changePage(-1)">← Prev</button>
@@ -503,6 +503,48 @@ let currentPage = 1, currentAged = '', debTimer;
 let agedPage365 = 1, agedPage180 = 1;
 let bracketPage = 1, bracketAged = '', bracketLabel = '';
 
+// ── SORT STATE ────────────────────────────────────────────────────────────────
+let _skusSort    = { col: '', dir: 'desc' };
+let _aged365Sort = { col: '', dir: 'desc' };
+let _aged180Sort = { col: '', dir: 'desc' };
+let _flaggedSort = { col: '', dir: 'desc' };
+let _bracketSort = { col: '', dir: 'desc' };
+
+const fmtVal = v => v > 0
+  ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+  : '<span style="color:#d1d5db">—</span>';
+
+function sIcon(col, sort) {
+  return sort.col === col
+    ? `<span style="margin-left:3px;font-size:10px;color:#6366f1">${sort.dir==='asc'?'↑':'↓'}</span>`
+    : '<span style="margin-left:3px;font-size:10px;opacity:.3">↕</span>';
+}
+function sTh(label, col, sort, fn, align='') {
+  const a = align ? `text-align:${align};` : '';
+  return `<th style="${a}cursor:pointer;user-select:none;white-space:nowrap" onclick="${fn}('${col}')">${label}${sIcon(col,sort)}</th>`;
+}
+
+function setSkusSort(col) {
+  _skusSort.dir = _skusSort.col===col ? (_skusSort.dir==='desc'?'asc':'desc') : 'desc';
+  _skusSort.col = col; loadItems(1);
+}
+function setAged365Sort(col) {
+  _aged365Sort.dir = _aged365Sort.col===col ? (_aged365Sort.dir==='desc'?'asc':'desc') : 'desc';
+  _aged365Sort.col = col; agedPage365=1; loadAgedSection(365,1);
+}
+function setAged180Sort(col) {
+  _aged180Sort.dir = _aged180Sort.col===col ? (_aged180Sort.dir==='desc'?'asc':'desc') : 'desc';
+  _aged180Sort.col = col; agedPage180=1; loadAgedSection(180,1);
+}
+function setFlaggedSort(col) {
+  _flaggedSort.dir = _flaggedSort.col===col ? (_flaggedSort.dir==='desc'?'asc':'desc') : 'desc';
+  _flaggedSort.col = col; loadFlagged365();
+}
+function setBracketSort(col) {
+  _bracketSort.dir = _bracketSort.col===col ? (_bracketSort.dir==='desc'?'asc':'desc') : 'desc';
+  _bracketSort.col = col; loadBracketSKUs(bracketAged, bracketLabel, 1);
+}
+
 // ── TABS ──────────────────────────────────────────────────────────────────────
 function showTab(name, el) {
   document.querySelectorAll('[id^="tab-"]').forEach(t => t.style.display = 'none');
@@ -587,6 +629,11 @@ async function loadUploadHistory() {
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 async function loadDashboard() {
+  _skusSort = { col: '', dir: 'desc' };
+  _aged365Sort = { col: '', dir: 'desc' };
+  _aged180Sort = { col: '', dir: 'desc' };
+  _flaggedSort = { col: '', dir: 'desc' };
+  _bracketSort = { col: '', dir: 'desc' };
   await loadSnapshots();
   await loadStats();
   await loadFilters();
@@ -674,20 +721,35 @@ async function loadStats() {
 async function loadFlagged365() {
   const snap = document.getElementById('snapshotSelect')?.value || '';
   try {
-    const d = await fetch(`/api/items?snapshot=${encodeURIComponent(snap)}&aged=365&page=1`).then(r => r.json());
+    const qs = new URLSearchParams({ snapshot: snap, aged: '365', page: '1' });
+    if (_flaggedSort.col) { qs.set('sort', _flaggedSort.col); qs.set('dir', _flaggedSort.dir); }
+    const d = await fetch(`/api/items?${qs}`).then(r => r.json());
     if (!d.records?.length) return;
     document.getElementById('flaggedCard').style.display = 'block';
     document.getElementById('flaggedMeta').textContent = `${fmtNum(d.total)} SKUs need immediate attention`;
-    document.getElementById('flaggedBody').innerHTML = d.records.slice(0,20).map(r =>
+    const s = _flaggedSort;
+    const th = (label, col, align='right') => sTh(label, col, s, 'setFlaggedSort', align);
+    document.getElementById('flaggedThead').innerHTML = `<tr>
+      ${th('Product','product_name','left')}
+      <th>FNSKU</th><th>ASIN</th><th>SKU</th>
+      ${th('Brand','brand','left')}
+      ${th('365–455d','age_365_455','right')}
+      ${th('455+d','age_455_plus','right')}
+      ${th('Total 365+','age_365_455','right')}
+      ${th('Inv. Value','inv_value','right')}
+      <th>Action</th>
+    </tr>`;
+    document.getElementById('flaggedBody').innerHTML = d.records.map(r =>
       `<tr class="flag-row-red">
         <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
         <td><div class="sku-text">${esc(r.fnsku||'—')}</div></td>
         <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
         <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
         <td>${esc(r.brand||'—')}</td>
-        <td style="color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
-        <td style="color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
-        <td><strong style="color:var(--red)">${fmtNum((r.age_365_455||0)+(r.age_455_plus||0))}</strong></td>
+        <td style="text-align:right;color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
+        <td style="text-align:right;color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
+        <td style="text-align:right"><strong style="color:var(--red)">${fmtNum((r.age_365_455||0)+(r.age_455_plus||0))}</strong></td>
+        <td style="text-align:right;font-weight:${r.inv_value>0?'500':'400'}">${fmtVal(r.inv_value)}</td>
         <td>${actionBadge(r.recommended_action)}</td>
       </tr>`
     ).join('');
@@ -718,6 +780,7 @@ async function loadItems(page) {
   const action  = document.getElementById('actionFilter')?.value || '';
   const storage = document.getElementById('storageFilter')?.value || '';
   const qs = new URLSearchParams({ snapshot:snap, page:currentPage, search, brand, action, storage, aged:currentAged });
+  if (_skusSort.col) { qs.set('sort', _skusSort.col); qs.set('dir', _skusSort.dir); }
   try {
     const d = await fetch(`/api/items?${qs}`).then(r => r.json());
     renderItems(d);
@@ -730,11 +793,22 @@ function renderItems(d) {
     document.getElementById('skuTableWrap').innerHTML = `<div class="empty-state"><h3>No items found</h3><p>Try adjusting your filters.</p></div>`;
     document.getElementById('pager').style.display = 'none'; return;
   }
+  const s = _skusSort;
+  const th = (label, col, align='right') => sTh(label, col, s, 'setSkusSort', align);
   document.getElementById('skuTableWrap').innerHTML = `<table>
     <thead><tr>
-      <th>Product</th><th>SKU</th><th>Brand</th><th>Units</th>
-      <th>Age Breakdown</th><th>0–90d</th><th>91–180d</th><th>180–365d</th>
-      <th>365+d</th><th>T30 Sales</th><th>Action</th>
+      ${th('Product','product_name','left')}
+      <th>SKU</th>
+      ${th('Brand','brand','left')}
+      ${th('Units','available','right')}
+      <th>Age Breakdown</th>
+      ${th('0–90d','age_0_90','right')}
+      ${th('91–180d','age_91_180','right')}
+      ${th('180–365d','age_181_270','right')}
+      ${th('365+d','age_365_455','right')}
+      ${th('Inv. Value','inv_value','right')}
+      ${th('T30 Sales','sold_t30','right')}
+      <th>Action</th>
     </tr></thead>
     <tbody>${d.records.map(r => {
       const aged365 = (r.age_365_455||0)+(r.age_455_plus||0);
@@ -745,13 +819,14 @@ function renderItems(d) {
         <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
         <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
         <td>${esc(r.brand||'—')}</td>
-        <td><strong>${fmtNum(r.available)}</strong></td>
+        <td style="text-align:right"><strong>${fmtNum(r.available)}</strong></td>
         <td><div class="mini-age">${vals.map((v,i)=>`<div class="mini-seg" style="flex:${Math.max(v,.01)};background:${AGE_COLORS[i]}"></div>`).join('')}</div></td>
-        <td>${fmtNum(r.age_0_90)}</td>
-        <td>${fmtNum(r.age_91_180)}</td>
-        <td style="${aged180>0?'color:var(--orange);font-weight:600':''}">${fmtNum(aged180)}</td>
-        <td>${aged365>0?`<strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong>`:'—'}</td>
-        <td>${r.sold_t30!=null?fmtNum(r.sold_t30):'—'}</td>
+        <td style="text-align:right">${fmtNum(r.age_0_90)}</td>
+        <td style="text-align:right">${fmtNum(r.age_91_180)}</td>
+        <td style="text-align:right;${aged180>0?'color:var(--orange);font-weight:600':''}">${fmtNum(aged180)}</td>
+        <td style="text-align:right">${aged365>0?`<strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong>`:'—'}</td>
+        <td style="text-align:right;font-weight:${r.inv_value>0?'500':'400'}">${fmtVal(r.inv_value)}</td>
+        <td style="text-align:right">${r.sold_t30!=null?fmtNum(r.sold_t30):'—'}</td>
         <td>${actionBadge(r.recommended_action)}</td>
       </tr>`;
     }).join('')}</tbody>
@@ -946,11 +1021,11 @@ async function loadAgedTab() {
 }
 
 async function loadAgedSection(days, page) {
-  const snap  = document.getElementById('snapshotSelect')?.value || '';
-  const limit = 50;
-  // For 180 section we want 180+ but NOT 365+ (just 180-364 range)
-  // We use a different endpoint call and filter on client for display
+  const snap = document.getElementById('snapshotSelect')?.value || '';
+  const sortObj = days === 365 ? _aged365Sort : _aged180Sort;
+  const sortFn  = days === 365 ? 'setAged365Sort' : 'setAged180Sort';
   const qs = new URLSearchParams({ snapshot: snap, aged: String(days), page: String(page) });
+  if (sortObj.col) { qs.set('sort', sortObj.col); qs.set('dir', sortObj.dir); }
   const wrapId   = `aged${days}Wrap`;
   const metaId   = `aged${days}Meta`;
   const pagerId  = `pager${days}`;
@@ -959,16 +1034,14 @@ async function loadAgedSection(days, page) {
   const infoId   = `pagerInfo${days}`;
 
   document.getElementById(wrapId).innerHTML =
-    `<table><tbody><tr><td colspan="10" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>`;
+    `<table><tbody><tr><td colspan="11" style="text-align:center;padding:32px"><span class="spinner"></span>Loading…</td></tr></tbody></table>`;
 
   try {
     const d = await fetch(`/api/items?${qs}`).then(r => r.json());
     const recs = (d.records || []).filter(r => {
       if (days === 180) {
-        // Only show items that are 180-364 days (not 365+), to avoid duplication
         const has180to365 = (r.age_181_270||0)+(r.age_271_365||0) > 0;
         const has365plus  = (r.age_365_455||0)+(r.age_455_plus||0) > 0;
-        // Include if they have 180-365 units (even if also has 365+, show all 180+ items)
         return has180to365 || has365plus;
       }
       return true;
@@ -985,19 +1058,28 @@ async function loadAgedSection(days, page) {
     document.getElementById(metaId).textContent = `${fmtNum(d.total)} SKUs`;
 
     const is365 = days === 365;
+    const th = (label, col, align='right', extraStyle='') =>
+      sTh(label, col, sortObj, sortFn, align) + (extraStyle ? `<!-- style override unsupported inline -->` : '');
+    const sTh2 = (label, col, color='', align='right') => {
+      const active = sortObj.col === col;
+      const icon = active
+        ? `<span style="margin-left:3px;font-size:10px;color:#6366f1">${sortObj.dir==='asc'?'↑':'↓'}</span>`
+        : '<span style="margin-left:3px;font-size:10px;opacity:.3">↕</span>';
+      return `<th style="text-align:${align};cursor:pointer;user-select:none;white-space:nowrap${color?';color:'+color:''}" onclick="${sortFn}('${col}')">${label}${icon}</th>`;
+    };
+
     document.getElementById(wrapId).innerHTML = `
       <table>
         <thead><tr>
-          <th>Product</th>
-          <th>FNSKU</th>
-          <th>ASIN</th>
-          <th>SKU</th>
-          <th>Brand</th>
+          ${sTh2('Product','product_name','','left')}
+          <th>FNSKU</th><th>ASIN</th><th>SKU</th>
+          ${sTh2('Brand','brand','','left')}
           ${is365
-            ? `<th style="color:var(--red)">365–455d</th><th style="color:var(--red)">455+d</th><th style="color:var(--red)">Total 365+</th>`
-            : `<th style="color:var(--orange)">181–270d</th><th style="color:var(--orange)">271–365d</th><th style="color:var(--red)">365+d</th><th style="color:var(--orange)">Total 180+</th>`
+            ? `${sTh2('365–455d','age_365_455','var(--red)')}${sTh2('455+d','age_455_plus','var(--red)')}${sTh2('Total 365+','age_365_455','var(--red)')}`
+            : `${sTh2('181–270d','age_181_270','var(--orange)')}${sTh2('271–365d','age_271_365','var(--orange)')}${sTh2('365+d','age_365_455','var(--red)')}${sTh2('Total 180+','age_181_270','var(--orange)')}`
           }
-          <th>Avail</th>
+          ${sTh2('Avail','available')}
+          ${sTh2('Inv. Value','inv_value')}
           <th>Action</th>
         </tr></thead>
         <tbody>${recs.map(r => {
@@ -1011,10 +1093,11 @@ async function loadAgedSection(days, page) {
               <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
               <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
               <td>${esc(r.brand||'—')}</td>
-              <td style="color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
-              <td style="color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
-              <td><strong style="color:var(--red)">${fmtNum(aged365)}</strong></td>
-              <td>${fmtNum(r.available)}</td>
+              <td style="text-align:right;color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
+              <td style="text-align:right;color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
+              <td style="text-align:right"><strong style="color:var(--red)">${fmtNum(aged365)}</strong></td>
+              <td style="text-align:right">${fmtNum(r.available)}</td>
+              <td style="text-align:right;font-weight:${r.inv_value>0?'500':'400'}">${fmtVal(r.inv_value)}</td>
               <td>${actionBadge(r.recommended_action)}</td>
             </tr>`;
           } else {
@@ -1024,11 +1107,12 @@ async function loadAgedSection(days, page) {
               <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
               <td><div class="sku-text">${esc(r.sku||'—')}</div></td>
               <td>${esc(r.brand||'—')}</td>
-              <td style="color:var(--orange)">${fmtNum(r.age_181_270)}</td>
-              <td style="color:var(--orange)">${fmtNum(r.age_271_365)}</td>
-              <td>${aged365>0?`<strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong>`:'—'}</td>
-              <td><strong style="color:var(--orange)">${fmtNum(aged180)}</strong></td>
-              <td>${fmtNum(r.available)}</td>
+              <td style="text-align:right;color:var(--orange)">${fmtNum(r.age_181_270)}</td>
+              <td style="text-align:right;color:var(--orange)">${fmtNum(r.age_271_365)}</td>
+              <td style="text-align:right">${aged365>0?`<strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong>`:'—'}</td>
+              <td style="text-align:right"><strong style="color:var(--orange)">${fmtNum(aged180)}</strong></td>
+              <td style="text-align:right">${fmtNum(r.available)}</td>
+              <td style="text-align:right;font-weight:${r.inv_value>0?'500':'400'}">${fmtVal(r.inv_value)}</td>
               <td>${actionBadge(r.recommended_action)}</td>
             </tr>`;
           }
@@ -1117,6 +1201,7 @@ function changeUnfulfPage(dir) { unfulfPage += dir; loadUnfulfillable(unfulfPage
 
 // ── BRACKET SKU TABLE (tile click) ───────────────────────────────────────────
 async function loadBracketSKUs(aged, label, page) {
+  if (aged !== bracketAged) _bracketSort = { col: '', dir: 'desc' };
   bracketAged  = aged;
   bracketLabel = label;
   bracketPage  = page || 1;
@@ -1131,6 +1216,7 @@ async function loadBracketSKUs(aged, label, page) {
 
   const snap = document.getElementById('snapshotSelect')?.value || '';
   const qs   = new URLSearchParams({ snapshot: snap, aged, page: bracketPage });
+  if (_bracketSort.col) { qs.set('sort', _bracketSort.col); qs.set('dir', _bracketSort.dir); }
 
   const card  = document.getElementById('bracketCard');
   const wrap  = document.getElementById('bracketWrap');
@@ -1157,22 +1243,31 @@ async function loadBracketSKUs(aged, label, page) {
 
     meta.textContent = `${fmtNum(d.total)} SKUs`;
 
-    // Choose which age column(s) to highlight based on bracket
-    const colHeader = aged === '0'   ? '<th style="color:var(--green)">0–90d</th>'
-                    : aged === '91'  ? '<th style="color:var(--yellow)">91–180d</th>'
-                    : aged === '181' ? '<th style="color:var(--orange)">181–270d</th>'
-                    : aged === '271' ? '<th style="color:var(--orange)">271–365d</th>'
-                    :                  '<th style="color:var(--red)">365–455d</th><th style="color:var(--red)">455+d</th><th style="color:var(--red)">Total 365+</th>';
+    const s = _bracketSort;
+    const bTh = (label, col, color='', align='right') => {
+      const active = s.col === col;
+      const icon = active
+        ? `<span style="margin-left:3px;font-size:10px;color:#6366f1">${s.dir==='asc'?'↑':'↓'}</span>`
+        : '<span style="margin-left:3px;font-size:10px;opacity:.3">↕</span>';
+      return `<th style="text-align:${align};cursor:pointer;user-select:none;white-space:nowrap${color?';color:'+color:''}" onclick="setBracketSort('${col}')">${label}${icon}</th>`;
+    };
+
+    const bracketHeader = aged === '0'   ? bTh('0–90d','age_0_90','var(--green)')
+                        : aged === '91'  ? bTh('91–180d','age_91_180','var(--yellow)')
+                        : aged === '181' ? bTh('181–270d','age_181_270','var(--orange)')
+                        : aged === '271' ? bTh('271–365d','age_271_365','var(--orange)')
+                        : bTh('365–455d','age_365_455','var(--red)')+bTh('455+d','age_455_plus','var(--red)')+bTh('Total 365+','age_365_455','var(--red)');
 
     wrap.innerHTML = `<table>
       <thead><tr>
-        <th>Product</th>
+        ${bTh('Product','product_name','','left')}
         <th>SKU</th>
         <th>ASIN</th>
-        <th>Brand</th>
-        ${colHeader}
-        <th>Avail Units</th>
-        <th>T30 Sales</th>
+        ${bTh('Brand','brand','','left')}
+        ${bracketHeader}
+        ${bTh('Avail Units','available')}
+        ${bTh('Inv. Value','inv_value')}
+        ${bTh('T30 Sales','sold_t30')}
         <th>Action</th>
       </tr></thead>
       <tbody>${d.records.map(r => {
@@ -1180,13 +1275,13 @@ async function loadBracketSKUs(aged, label, page) {
         const rowCls  = aged365 > 0 ? 'flag-row-red' : (aged==='181'||aged==='271') ? 'flag-row' : '';
 
         const bracketCell =
-          aged === '0'   ? `<td style="color:var(--green);font-weight:600">${fmtNum(r.age_0_90)}</td>`
-        : aged === '91'  ? `<td style="color:var(--yellow);font-weight:600">${fmtNum(r.age_91_180)}</td>`
-        : aged === '181' ? `<td style="color:var(--orange);font-weight:600">${fmtNum(r.age_181_270)}</td>`
-        : aged === '271' ? `<td style="color:var(--orange);font-weight:600">${fmtNum(r.age_271_365)}</td>`
-        : `<td style="color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
-           <td style="color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
-           <td><strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong></td>`;
+          aged === '0'   ? `<td style="text-align:right;color:var(--green);font-weight:600">${fmtNum(r.age_0_90)}</td>`
+        : aged === '91'  ? `<td style="text-align:right;color:var(--yellow);font-weight:600">${fmtNum(r.age_91_180)}</td>`
+        : aged === '181' ? `<td style="text-align:right;color:var(--orange);font-weight:600">${fmtNum(r.age_181_270)}</td>`
+        : aged === '271' ? `<td style="text-align:right;color:var(--orange);font-weight:600">${fmtNum(r.age_271_365)}</td>`
+        : `<td style="text-align:right;color:var(--red);font-weight:700">${fmtNum(r.age_365_455)}</td>
+           <td style="text-align:right;color:var(--red);font-weight:700">${fmtNum(r.age_455_plus)}</td>
+           <td style="text-align:right"><strong style="color:var(--red)">🚨 ${fmtNum(aged365)}</strong></td>`;
 
         return `<tr class="${rowCls}">
           <td><div class="prod-name" title="${esc(r.product_name)}">${esc(r.product_name||'—')}</div></td>
@@ -1194,8 +1289,9 @@ async function loadBracketSKUs(aged, label, page) {
           <td><div class="sku-text">${esc(r.asin||'—')}</div></td>
           <td>${esc(r.brand||'—')}</td>
           ${bracketCell}
-          <td>${fmtNum(r.available)}</td>
-          <td>${r.sold_t30 != null ? fmtNum(r.sold_t30) : '—'}</td>
+          <td style="text-align:right">${fmtNum(r.available)}</td>
+          <td style="text-align:right;font-weight:${r.inv_value>0?'500':'400'}">${fmtVal(r.inv_value)}</td>
+          <td style="text-align:right">${r.sold_t30 != null ? fmtNum(r.sold_t30) : '—'}</td>
           <td>${actionBadge(r.recommended_action)}</td>
         </tr>`;
       }).join('')}</tbody>
@@ -1223,6 +1319,7 @@ function changeBracketPage(dir) {
 
 let unfulfBracketPage = 1;
 async function loadUnfulfBracket(page) {
+  if (bracketAged !== 'unfulfilable') _bracketSort = { col: '', dir: 'desc' };
   unfulfBracketPage = page || 1;
   bracketAged  = 'unfulfilable';
   bracketLabel = 'Unfulfillable';
