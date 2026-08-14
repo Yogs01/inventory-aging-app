@@ -711,7 +711,7 @@ function renderBrandTable(brands) {
     const aged180 = b.aged_180_plus||0;
     const p = b.units>0 ? (aged180/b.units*100).toFixed(1) : 0;
     const color = p>30?'var(--red)':p>15?'var(--orange)':'var(--yellow)';
-    return `<tr onclick="openBrandModal(${JSON.stringify(b.brand)})">
+    return `<tr data-brand="${esc(b.brand)}">
       <td><strong>${esc(b.brand)}</strong></td>
       <td>${fmtNum(b.skus)}</td>
       <td>${fmtNum(b.units)}</td>
@@ -725,6 +725,11 @@ function renderBrandTable(brands) {
 }
 
 // ── BRAND ASIN MODAL ──────────────────────────────────────────────────────────
+document.getElementById('brandBody').addEventListener('click', e => {
+  const row = e.target.closest('tr[data-brand]');
+  if (row) openBrandModal(row.dataset.brand);
+});
+
 async function openBrandModal(brand) {
   document.getElementById('modalTitle').textContent = brand + ' — ASINs';
   document.getElementById('modalBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>';
