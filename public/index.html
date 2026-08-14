@@ -191,6 +191,10 @@ tr:hover td{background:var(--bg)}
 .modal-num-zero{color:#d1d5db}
 .modal-asin{font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;color:#6366f1;letter-spacing:.02em}
 .modal-product{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;color:#374151;font-size:13px}
+.modal-th{cursor:pointer;user-select:none;white-space:nowrap}
+.modal-th:hover{color:#4b5563}
+.modal-th .sort-icon{display:inline-block;margin-left:4px;opacity:.3;font-size:10px;vertical-align:middle}
+.modal-th.sort-asc .sort-icon,.modal-th.sort-desc .sort-icon{opacity:1;color:#6366f1}
 </style>
 </head>
 <body>
@@ -416,9 +420,15 @@ tr:hover td{background:var(--bg)}
     <div class="modal-body">
       <table>
         <colgroup><col><col><col><col><col><col><col><col></colgroup>
-        <thead><tr>
-          <th>ASIN</th><th>Product</th>
-          <th style="text-align:right">Total Units</th><th style="text-align:right">0–90d</th><th style="text-align:right">91–180d</th><th style="text-align:right">180–365d</th><th style="text-align:right">365+d</th><th style="text-align:right">Removal Qty</th>
+        <thead id="modalThead"><tr>
+          <th class="modal-th" data-col="asin" data-type="str" style="text-align:left">ASIN <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="product_name" data-type="str" style="text-align:left">Product <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="total_units" data-type="num" style="text-align:right">Total Units <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="age_0_90" data-type="num" style="text-align:right">0–90d <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="age_91_180" data-type="num" style="text-align:right">91–180d <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="age_180_365" data-type="num" style="text-align:right">180–365d <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="age_365_plus" data-type="num" style="text-align:right">365+d <span class="sort-icon">↕</span></th>
+          <th class="modal-th" data-col="removal_qty" data-type="num" style="text-align:right">Removal Qty <span class="sort-icon">↕</span></th>
         </tr></thead>
         <tbody id="modalBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
@@ -737,9 +747,24 @@ function renderBrandTable(brands) {
 }
 
 // ── BRAND ASIN MODAL ──────────────────────────────────────────────────────────
+let _modalRecords = [];
+let _modalSort = { col: 'age_180_365', dir: 'desc' };
+
 document.getElementById('brandBody').addEventListener('click', e => {
   const row = e.target.closest('tr[data-brand]');
   if (row) openBrandModal(row.dataset.brand);
+});
+
+document.getElementById('modalThead').addEventListener('click', e => {
+  const th = e.target.closest('.modal-th');
+  if (!th) return;
+  const col = th.dataset.col;
+  if (_modalSort.col === col) {
+    _modalSort.dir = _modalSort.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    _modalSort = { col, dir: th.dataset.type === 'str' ? 'asc' : 'desc' };
+  }
+  renderModalRows();
 });
 
 async function openBrandModal(brand) {
@@ -747,6 +772,7 @@ async function openBrandModal(brand) {
   document.getElementById('modalBody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr>';
   document.getElementById('brandModal').style.display = 'flex';
   document.body.style.overflow = 'hidden';
+  _modalSort = { col: 'age_180_365', dir: 'desc' };
 
   const snap = document.getElementById('snapshotSelect')?.value || '';
   const params = new URLSearchParams({ brand, ...(snap ? { snapshot: snap } : {}) });
@@ -757,8 +783,30 @@ async function openBrandModal(brand) {
     return;
   }
 
+  _modalRecords = d.records;
+  renderModalRows();
+}
+
+function renderModalRows() {
+  const { col, dir } = _modalSort;
+
+  document.querySelectorAll('#modalThead .modal-th').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    th.querySelector('.sort-icon').textContent = '↕';
+    if (th.dataset.col === col) {
+      th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+      th.querySelector('.sort-icon').textContent = dir === 'asc' ? '↑' : '↓';
+    }
+  });
+
+  const sorted = [..._modalRecords].sort((a, b) => {
+    const av = a[col] ?? '', bv = b[col] ?? '';
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : (av - bv);
+    return dir === 'asc' ? cmp : -cmp;
+  });
+
   const n = v => v > 0 ? `<span class="modal-num-normal">${fmtNum(v)}</span>` : `<span class="modal-num-zero">—</span>`;
-  document.getElementById('modalBody').innerHTML = d.records.map(r => {
+  document.getElementById('modalBody').innerHTML = sorted.map(r => {
     const aged365 = r.age_365_plus||0;
     const aged180 = r.age_180_365||0;
     return `<tr>
