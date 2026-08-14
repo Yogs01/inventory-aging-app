@@ -164,22 +164,32 @@ tr:hover td{background:var(--bg)}
 .brand-table tbody tr:hover{background:rgba(99,102,241,.07)}
 
 /* ── MODAL ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
-.modal-box{background:var(--card);border-radius:14px;width:100%;max-width:900px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-.modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border);flex-shrink:0}
-.modal-header h3{font-size:16px;font-weight:700;margin:0}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-box{background:var(--card);border-radius:14px;width:96%;max-width:1000px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.4);position:relative;z-index:10000}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-header h3{font-size:15px;font-weight:700;margin:0}
 .modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1;padding:4px 8px;border-radius:6px}
 .modal-close:hover{background:var(--border);color:var(--text)}
-.modal-body{overflow-y:auto;flex:1}
-.modal-body table{width:100%;border-collapse:collapse;font-size:13px}
-.modal-body thead th{position:sticky;top:0;background:var(--card);padding:10px 14px;text-align:right;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
-.modal-body thead th:first-child,.modal-body thead th:nth-child(2){text-align:left}
-.modal-body tbody td{padding:9px 14px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
-.modal-body tbody td:first-child,.modal-body tbody td:nth-child(2){text-align:left}
+.modal-body{overflow-y:auto;overflow-x:auto;flex:1}
+.modal-body table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.modal-body colgroup col:nth-child(1){width:130px}
+.modal-body colgroup col:nth-child(2){width:220px}
+.modal-body colgroup col:nth-child(3){width:90px}
+.modal-body colgroup col:nth-child(4){width:75px}
+.modal-body colgroup col:nth-child(5){width:75px}
+.modal-body colgroup col:nth-child(6){width:85px}
+.modal-body colgroup col:nth-child(7){width:75px}
+.modal-body colgroup col:nth-child(8){width:95px}
+.modal-body thead th{position:sticky;top:0;z-index:2;background:var(--card);padding:9px 12px;text-align:right;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--border);white-space:nowrap}
+.modal-body thead th:first-child{text-align:left}
+.modal-body thead th:nth-child(2){text-align:left}
+.modal-body tbody td{padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modal-body tbody td:first-child{text-align:left}
+.modal-body tbody td:nth-child(2){text-align:left}
 .modal-body tbody tr:last-child td{border-bottom:none}
 .modal-body tbody tr:hover{background:rgba(99,102,241,.05)}
 .modal-asin{font-family:monospace;font-size:12px;color:#6366f1}
-.modal-product{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.modal-product{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
 </style>
 </head>
 <body>
@@ -404,9 +414,10 @@ tr:hover td{background:var(--bg)}
     </div>
     <div class="modal-body">
       <table>
+        <colgroup><col><col><col><col><col><col><col><col></colgroup>
         <thead><tr>
           <th>ASIN</th><th>Product</th>
-          <th>Total Units</th><th>0–90d</th><th>91–180d</th><th>180–365d</th><th>365+d</th><th>Removal Qty</th>
+          <th style="text-align:right">Total Units</th><th style="text-align:right">0–90d</th><th style="text-align:right">91–180d</th><th style="text-align:right">180–365d</th><th style="text-align:right">365+d</th><th style="text-align:right">Removal Qty</th>
         </tr></thead>
         <tbody id="modalBody"><tr><td colspan="8" style="text-align:center;padding:32px"><span class="spinner"></span></td></tr></tbody>
       </table>
